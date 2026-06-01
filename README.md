@@ -7,6 +7,7 @@ Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 - Routes feed fetching through FlareSolverr to bypass Cloudflare JS challenges
 - Global mode: all feeds through FlareSolverr
 - Per-feed mode: enable only for specific feeds in the feed editor
+- Smart mode: auto-detects Cloudflare blocks and permanently enables FlareSolverr per-feed
 - Built-in connection tester to validate FlareSolverr is working
 - Configurable timeout per request
 
@@ -37,7 +38,7 @@ Configure the following in Preferences → Feeds → Plugins → Cloudflare Bypa
 
 - **FlareSolverr URL**: address of your FlareSolverr instance (default: `http://localhost:8191`)
 - **Max timeout**: maximum wait time in milliseconds (default: `60000`)
-- **Mode**: `Per feed` or `All feeds through FlareSolverr`
+- **Mode**: `Per feed`, `All feeds through FlareSolverr`, or `Smart mode`
 
 Use the **Test Connection** button to verify FlareSolverr is reachable and can fetch a feed URL.
 
@@ -50,6 +51,10 @@ Right-click a feed → Edit → check "Use FlareSolverr to fetch this feed".
 ### 2. Global mode
 
 Enable "All feeds through FlareSolverr" in the plugin settings. Every feed update will be routed through FlareSolverr.
+
+### 3. Smart mode
+
+Enable "Smart mode" in the plugin settings. When a feed returns a Cloudflare block page, the plugin automatically detects it, re-fetches via FlareSolverr, and permanently saves the feed for future FlareSolverr routing. Subsequent updates use FlareSolverr directly (no double-fetch).
 
 ## Troubleshooting
 

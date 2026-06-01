@@ -37,5 +37,34 @@ Plugins.Fu_Cloudflare = {
 					"</div>";
 			}
 		});
+	},
+
+	purgeSmartList: function() {
+		Notify.progress('Purging smart-added feeds...', true);
+
+		xhr.post("backend.php", {
+			op: "PluginHandler",
+			plugin: "fu_cloudflare",
+			method: "clearSmartList"
+		}, function(reply) {
+			var div = document.getElementById("fu_purge_result");
+
+			try {
+				var result = JSON.parse(reply);
+
+				if (result.success) {
+					div.innerHTML = "<div class='notice alert alert-info'>" +
+						result.message +
+						"</div>";
+					Plugins.reload();
+				} else {
+					div.innerHTML = "<div class='notice alert alert-warning'>" +
+						result.error +
+						"</div>";
+				}
+			} catch(e) {
+				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
+			}
+		});
 	}
 };
