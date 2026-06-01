@@ -34,6 +34,7 @@ class Fu_Cloudflare extends Plugin {
 		$enabled = $this->host->get($this, "enabled", "1");
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
+		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
 		$mode = $this->host->get($this, "mode", "per_feed");
 		$smart_expiry_hours = (int)$this->host->get($this, "smart_expiry_hours", 720);
 		$enabled_feeds = $this->filter_unknown_feeds($this->host->get_array($this, "enabled_feeds"));
@@ -78,6 +79,13 @@ class Fu_Cloudflare extends Plugin {
 					<label><?= __('Max timeout (ms):') ?></label>
 					<input dojoType='dijit.form.NumberSpinner' name='max_timeout'
 						value='<?= $max_timeout ?>' smallDelta='5000' min='5000' max='300000'>
+				</fieldset>
+
+				<fieldset>
+					<label><?= __('Max concurrent requests:') ?></label>
+					<input dojoType='dijit.form.NumberSpinner' name='max_concurrent'
+						value='<?= $max_concurrent ?>' smallDelta='1' min='0' max='20'
+						title='<?= __('0 = unlimited') ?>'>
 				</fieldset>
 
 				<fieldset>
@@ -170,6 +178,7 @@ class Fu_Cloudflare extends Plugin {
 		$enabled = clean($_POST["enabled"] ?? "1");
 		$flaresolverr_url = clean($_POST["flaresolverr_url"] ?? "");
 		$max_timeout = (int)($_POST["max_timeout"] ?? 60000);
+		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
 		$mode = clean($_POST["mode"] ?? "per_feed");
 		$smart_expiry_hours = (int)($_POST["smart_expiry_hours"] ?? 720);
 
@@ -179,6 +188,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "enabled", $enabled);
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
+		$this->host->set($this, "max_concurrent", $max_concurrent);
 		$this->host->set($this, "mode", $mode);
 		$this->host->set($this, "smart_expiry_hours", $smart_expiry_hours);
 
@@ -205,12 +215,12 @@ class Fu_Cloudflare extends Plugin {
 		$result = $this->fetch_via_flaresolverr($test_url, $flaresolverr_url);
 		$elapsed = round(microtime(true) - $start, 2);
 
-		if ($result) {
+		if ($result['success']) {
 			$dom = new DOMDocument();
 			$title = '';
 			$feed_title = '';
 
-			if (@$dom->loadXML(mb_substr($result, 0, 10000))) {
+			if (@$dom->loadXML(mb_substr($result['data'], 0, 10000))) {
 				$xpath = new DOMXPath($dom);
 				$xpath->registerNamespace('atom', 'http://www.w3.org/2005/Atom');
 				$channel = $xpath->query('/rss/channel/title');
@@ -221,7 +231,7 @@ class Fu_Cloudflare extends Plugin {
 				}
 			}
 
-			$size = strlen($result);
+			$size = strlen($result['data']);
 
 			Logger::log(E_USER_NOTICE, "fu_cloudflare: connection test OK — {$elapsed}s, {$size}B", $test_url);
 
@@ -232,11 +242,12 @@ class Fu_Cloudflare extends Plugin {
 				"title" => $feed_title ?: __('(feed parsed, no title found)'),
 			]);
 		} else {
-			Logger::log(E_USER_WARNING, "fu_cloudflare: connection test FAILED", $test_url);
+			$error_msg = $result['error'] ?? __('Unknown error');
+			Logger::log(E_USER_WARNING, "fu_cloudflare: connection test FAILED — $error_msg", $test_url);
 
 			echo json_encode([
 				"success" => false,
-				"error" => __("Failed to fetch URL through FlareSolverr. Check the FlareSolverr URL and logs."),
+				"error" => $error_msg,
 			]);
 		}
 	}
@@ -309,8 +320,8 @@ class Fu_Cloudflare extends Plugin {
 		$mode = $this->host->get($this, "mode", "per_feed");
 
 		if ($mode == "global") {
-			$result = $this->fetch_via_flaresolverr($fetch_url, $flaresolverr_url);
-			return $result ?: $feed_data;
+			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+			return $result !== false ? $result : $feed_data;
 		}
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
@@ -334,13 +345,13 @@ class Fu_Cloudflare extends Plugin {
 					}
 				}
 
-				$result = $this->fetch_via_flaresolverr($fetch_url, $flaresolverr_url);
-				return $result ?: $feed_data;
+				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+				return $result !== false ? $result : $feed_data;
 			}
 
 			if ($this->is_cloudflare_blocked($feed_data)) {
-				$result = $this->fetch_via_flaresolverr($fetch_url, $flaresolverr_url);
-				if ($result) {
+				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+				if ($result !== false) {
 					$smart_added[$feed_id] = time();
 					if (!in_array($feed, $enabled_feeds)) {
 						$enabled_feeds[] = $feed;
@@ -357,11 +368,105 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		if (in_array($feed, $enabled_feeds)) {
-			$result = $this->fetch_via_flaresolverr($fetch_url, $flaresolverr_url);
-			return $result ?: $feed_data;
+			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+			return $result !== false ? $result : $feed_data;
 		}
 
 		return $feed_data;
+	}
+
+	private function fetch_with_rate_limit($url, $flaresolverr_url) {
+		if ($this->acquire_flaresolverr_slot()) {
+			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url);
+			$this->release_flaresolverr_slot();
+			if ($result['success']) {
+				return $result['data'];
+			}
+			Logger::log(E_USER_WARNING, "fu_cloudflare: FlareSolverr error for $url — " . ($result['error'] ?? 'unknown'));
+		} else {
+			Logger::log(E_USER_WARNING, "fu_cloudflare: rate limit reached, skipped feed", $url);
+		}
+		return false;
+	}
+
+	private function acquire_flaresolverr_slot() {
+		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
+		if ($max_concurrent < 1) return true;
+
+		$file = sys_get_temp_dir() . '/fu_cloudflare_semaphore';
+		$fp = @fopen($file, 'c+');
+		if (!$fp) return true;
+
+		flock($fp, LOCK_EX);
+		$count = (int)trim(fread($fp, 1024));
+
+		if ($count >= $max_concurrent) {
+			flock($fp, LOCK_UN);
+			fclose($fp);
+			return false;
+		}
+
+		ftruncate($fp, 0);
+		fwrite($fp, (string)($count + 1));
+		fflush($fp);
+		flock($fp, LOCK_UN);
+		fclose($fp);
+
+		return true;
+	}
+
+	private function release_flaresolverr_slot() {
+		$file = sys_get_temp_dir() . '/fu_cloudflare_semaphore';
+		$fp = @fopen($file, 'c+');
+		if (!$fp) return;
+
+		flock($fp, LOCK_EX);
+		$count = (int)trim(fread($fp, 1024));
+		if ($count > 0) {
+			ftruncate($fp, 0);
+			fwrite($fp, (string)($count - 1));
+			fflush($fp);
+		}
+		flock($fp, LOCK_UN);
+		fclose($fp);
+	}
+
+	private function fetch_via_flaresolverr($url, $flaresolverr_url) {
+		$timeout = (int)$this->host->get($this, "max_timeout", 60000);
+
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
+		curl_setopt($ch, CURLOPT_POST, 1);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+			'cmd' => 'request.get',
+			'url' => $url,
+			'maxTimeout' => $timeout,
+		]));
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+		curl_setopt($ch, CURLOPT_TIMEOUT, (int)ceil($timeout / 1000) + 10);
+
+		$response = curl_exec($ch);
+		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$curl_error = curl_error($ch);
+		curl_close($ch);
+
+		if ($http_code == 200 && $response) {
+			$data = json_decode($response, true);
+			if (isset($data['solution']['response'])) {
+				return ['success' => true, 'data' => $data['solution']['response']];
+			}
+			if (isset($data['error'])) {
+				return ['success' => false, 'error' => $data['error']];
+			}
+			return ['success' => false, 'error' => "HTTP $http_code: FlareSolverr returned no solution"];
+		}
+
+		if ($curl_error) {
+			return ['success' => false, 'error' => "cURL error: $curl_error"];
+		}
+
+		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code"];
 	}
 
 	private function is_cloudflare_blocked($data) {
@@ -386,35 +491,6 @@ class Fu_Cloudflare extends Plugin {
 		foreach ($indicators as $indicator) {
 			if (mb_strpos($lower, mb_strtolower($indicator)) !== false) {
 				return true;
-			}
-		}
-
-		return false;
-	}
-
-	private function fetch_via_flaresolverr($url, $flaresolverr_url) {
-		$timeout = (int)$this->host->get($this, "max_timeout", 60000);
-
-		$ch = curl_init();
-		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
-		curl_setopt($ch, CURLOPT_POST, 1);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-			'cmd' => 'request.get',
-			'url' => $url,
-			'maxTimeout' => $timeout,
-		]));
-		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-		curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
-		curl_setopt($ch, CURLOPT_TIMEOUT, (int)ceil($timeout / 1000) + 10);
-
-		$response = curl_exec($ch);
-		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
-
-		if ($http_code == 200 && $response) {
-			$data = json_decode($response, true);
-			if (isset($data['solution']['response'])) {
-				return $data['solution']['response'];
 			}
 		}
 
