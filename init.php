@@ -127,6 +127,15 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
+			<h3><?= __('FlareSolverr Health Check') ?></h3>
+			<p class='text-muted'><?= __('Verify that FlareSolverr is reachable and responding.') ?></p>
+			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFlareSolverr()'>
+				<?= __('Test FlareSolverr') ?>
+			</button>
+			<div id='fu_flaresolverr_result' style='margin-top: 8px'></div>
+
+			<hr/>
+
 			<h3><?= __('Test Connection') ?></h3>
 			<form dojoType='dijit.form.Form'>
 				<fieldset>
@@ -249,6 +258,60 @@ class Fu_Cloudflare extends Plugin {
 				"error" => $error_msg,
 			]);
 		}
+	}
+
+	function testFlareSolverr() : void {
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
+		if (!$flaresolverr_url) {
+			echo json_encode(["success" => false, "error" => __("FlareSolverr URL is not configured.")]);
+			return;
+		}
+
+		$start = microtime(true);
+
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
+		curl_setopt($ch, CURLOPT_POST, 1);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
+			'cmd' => 'request.get',
+			'url' => 'https://example.com',
+			'maxTimeout' => 10000,
+		]));
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 15);
+
+		$response = curl_exec($ch);
+		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		$curl_error = curl_error($ch);
+		curl_close($ch);
+
+		$elapsed = round(microtime(true) - $start, 2);
+
+		if ($http_code == 200 && $response) {
+			$data = json_decode($response, true);
+			if (isset($data['solution']['response'])) {
+				$version = $data['version'] ?? 'unknown';
+				$body_size = strlen($data['solution']['response']);
+				echo json_encode([
+					"success" => true,
+					"time" => $elapsed,
+					"version" => $version,
+					"body_size" => $body_size,
+				]);
+				return;
+			}
+			$error = $data['error'] ?? "HTTP 200 but no solution returned";
+			echo json_encode(["success" => false, "error" => $error]);
+			return;
+		}
+
+		if ($curl_error) {
+			echo json_encode(["success" => false, "error" => "cURL error: $curl_error"]);
+			return;
+		}
+
+		echo json_encode(["success" => false, "error" => "FlareSolverr returned HTTP $http_code"]);
 	}
 
 	function clearSmartList() : void {
