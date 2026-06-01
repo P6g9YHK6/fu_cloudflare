@@ -1,0 +1,6 @@
+{
+    "name": "P6g9YHK6/fu_cloudflare",
+    "description": "Bypass Cloudflare protection for RSS feeds using FlareSolverr",
+    "type": "ttrss-plugin",
+    "require": {}
+}
