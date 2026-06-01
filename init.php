@@ -176,7 +176,7 @@ class Fu_Cloudflare extends Plugin {
 				</ul>
 			<?php } ?>
 		</div>
-		<script type="text/javascript">
+		<script type="dojo/method">
 			window.Plugins = window.Plugins || {};
 			window.Plugins.Fu_Cloudflare = {
 				testConnection: function() {
