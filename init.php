@@ -173,11 +173,21 @@ class Fu_Cloudflare extends Plugin {
 		$mode = clean($_POST["mode"] ?? "per_feed");
 		$smart_expiry_hours = (int)($_POST["smart_expiry_hours"] ?? 720);
 
+		$prev_mode = $this->host->get($this, "mode", "per_feed");
+		$prev_enabled = $this->host->get($this, "enabled", "1");
+
 		$this->host->set($this, "enabled", $enabled);
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
 		$this->host->set($this, "mode", $mode);
 		$this->host->set($this, "smart_expiry_hours", $smart_expiry_hours);
+
+		if ($prev_enabled !== $enabled) {
+			Logger::log(E_USER_NOTICE, "fu_cloudflare: " . ($enabled === "1" ? "enabled" : "disabled"));
+		}
+		if ($prev_mode !== $mode) {
+			Logger::log(E_USER_NOTICE, "fu_cloudflare: mode changed to $mode");
+		}
 
 		echo __("Data saved.");
 	}
@@ -213,6 +223,8 @@ class Fu_Cloudflare extends Plugin {
 
 			$size = strlen($result);
 
+			Logger::log(E_USER_NOTICE, "fu_cloudflare: connection test OK — {$elapsed}s, {$size}B", $test_url);
+
 			echo json_encode([
 				"success" => true,
 				"time" => $elapsed,
@@ -220,6 +232,8 @@ class Fu_Cloudflare extends Plugin {
 				"title" => $feed_title ?: __('(feed parsed, no title found)'),
 			]);
 		} else {
+			Logger::log(E_USER_WARNING, "fu_cloudflare: connection test FAILED", $test_url);
+
 			echo json_encode([
 				"success" => false,
 				"error" => __("Failed to fetch URL through FlareSolverr. Check the FlareSolverr URL and logs."),
@@ -247,6 +261,8 @@ class Fu_Cloudflare extends Plugin {
 
 		$this->host->set($this, "enabled_feeds", array_values($enabled_feeds));
 		$this->host->set($this, "smart_added_feeds", "{}");
+
+		Logger::log(E_USER_NOTICE, "fu_cloudflare: purged $removed smart-added feed(s)");
 
 		echo json_encode([
 			"success" => true,
@@ -313,6 +329,7 @@ class Fu_Cloudflare extends Plugin {
 						if ($key !== false) unset($enabled_feeds[$key]);
 						$this->host->set($this, "enabled_feeds", array_values($enabled_feeds));
 						$this->host->set($this, "smart_added_feeds", json_encode($smart_added));
+						Logger::log(E_USER_NOTICE, "fu_cloudflare: feed $feed expired, removed for retry", $fetch_url);
 						return $feed_data;
 					}
 				}
@@ -330,8 +347,10 @@ class Fu_Cloudflare extends Plugin {
 					}
 					$this->host->set($this, "enabled_feeds", $enabled_feeds);
 					$this->host->set($this, "smart_added_feeds", json_encode($smart_added));
+					Logger::log(E_USER_NOTICE, "fu_cloudflare: Cloudflare blocked, auto-enabled feed $feed", $fetch_url);
 					return $result;
 				}
+				Logger::log(E_USER_WARNING, "fu_cloudflare: Cloudflare blocked but FlareSolverr failed for feed $feed", $fetch_url);
 			}
 
 			return $feed_data;
