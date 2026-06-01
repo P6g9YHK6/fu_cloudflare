@@ -217,7 +217,6 @@ class Fu_Cloudflare extends Plugin {
 
 		if ($result['success']) {
 			$dom = new DOMDocument();
-			$title = '';
 			$feed_title = '';
 
 			if (@$dom->loadXML(mb_substr($result['data'], 0, 10000))) {
@@ -361,7 +360,6 @@ class Fu_Cloudflare extends Plugin {
 					Logger::log(E_USER_NOTICE, "fu_cloudflare: Cloudflare blocked, auto-enabled feed $feed", $fetch_url);
 					return $result;
 				}
-				Logger::log(E_USER_WARNING, "fu_cloudflare: Cloudflare blocked but FlareSolverr failed for feed $feed", $fetch_url);
 			}
 
 			return $feed_data;
