@@ -92,6 +92,18 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
+			<h3><?= __('FlareSolverr Session') ?></h3>
+			<p class='text-muted'><?= __('FlareSolverr uses a browser session to solve multi-step challenges. A persistent session allows the JavaScript PoW to complete in the background.') ?></p>
+			<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
+				<?= $this->host->get($this, "session_id", "") ? __('Active') : __('None') ?>
+			</span></p>
+			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
+				<?= __('Reset Session') ?>
+			</button>
+			<div id='fu_session_result' style='margin-top: 8px'></div>
+
+			<hr/>
+
 			<h3><?= __('FlareSolverr Health Check') ?></h3>
 			<p class='text-muted'><?= __('Verify that FlareSolverr is reachable and responding.') ?></p>
 			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFlareSolverr()'>
@@ -301,10 +313,24 @@ class Fu_Cloudflare extends Plugin {
 			return $feed_data;
 		}
 
+		$session = $this->get_session($flaresolverr_url);
+		if ($session) {
+			Debug::log("fu_cloudflare: using FlareSolverr session $session", Debug::LOG_VERBOSE);
+		}
+
 		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
-		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
 		if ($result !== false) {
 			if ($this->is_cloudflare_challenge($result)) {
+				Debug::log("fu_cloudflare: challenge present, retrying with session after 3s...", Debug::LOG_VERBOSE);
+				sleep(3);
+				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+
+				if ($result !== false && !$this->is_cloudflare_challenge($result)) {
+					Debug::log("fu_cloudflare: retry OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+					return $result;
+				}
+
 				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
 				Debug::log($msg, Debug::LOG_VERBOSE);
 				Logger::log(E_USER_WARNING, $msg, $fetch_url);
@@ -325,9 +351,46 @@ class Fu_Cloudflare extends Plugin {
 		return false;
 	}
 
-	private function fetch_with_rate_limit($url, $flaresolverr_url) {
+	private function get_session($flaresolverr_url) {
+		$session = $this->host->get($this, "session_id", "");
+		if ($session) return $session;
+
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
+		curl_setopt($ch, CURLOPT_POST, 1);
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode(['cmd' => 'sessions.create']));
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+		$response = curl_exec($ch);
+		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		curl_close($ch);
+
+		if ($http_code == 200 && $response) {
+			$data = json_decode($response, true);
+			if (isset($data['session'])) {
+				$this->host->set($this, "session_id", $data['session']);
+				Debug::log("fu_cloudflare: created session {$data['session']}", Debug::LOG_VERBOSE);
+				return $data['session'];
+			}
+		}
+		return null;
+	}
+
+	function resetSession() : void {
+		$this->host->set($this, "session_id", "");
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
+		if ($flaresolverr_url) {
+			$session = $this->get_session($flaresolverr_url);
+			echo json_encode(["success" => true, "session" => $session ?: ""]);
+		} else {
+			echo json_encode(["success" => false, "error" => __("FlareSolverr URL not configured")]);
+		}
+	}
+
+	private function fetch_with_rate_limit($url, $flaresolverr_url, $session = null) {
 		if ($this->acquire_flaresolverr_slot()) {
-			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url);
+			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session);
 			$this->release_flaresolverr_slot();
 			if ($result['success']) {
 				return $result['data'];
@@ -381,17 +444,20 @@ class Fu_Cloudflare extends Plugin {
 		fclose($fp);
 	}
 
-	private function fetch_via_flaresolverr($url, $flaresolverr_url) {
+	private function fetch_via_flaresolverr($url, $flaresolverr_url, $session = null) {
 		$timeout = (int)$this->host->get($this, "max_timeout", 60000);
+
+		$body = [
+			'cmd' => 'request.get',
+			'url' => $url,
+			'maxTimeout' => $timeout,
+		];
+		if ($session) $body['session'] = $session;
 
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
 		curl_setopt($ch, CURLOPT_POST, 1);
-		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode([
-			'cmd' => 'request.get',
-			'url' => $url,
-			'maxTimeout' => $timeout,
-		]));
+		curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		curl_setopt($ch, CURLOPT_HTTPHEADER, ['Content-Type: application/json']);
 		curl_setopt($ch, CURLOPT_TIMEOUT, (int)ceil($timeout / 1000) + 10);
