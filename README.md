@@ -2,16 +2,14 @@
 
 Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 
+<img width="803" height="847" alt="image" src="https://github.com/user-attachments/assets/01953e77-b860-46d9-8628-35d52aef9a50" />
+
 ## Features
 
 - Routes feed fetching through FlareSolverr to bypass Cloudflare JS challenges
 - Per-feed toggle: enable only for specific feeds in the feed editor
 - FlareSolverr session management: persistent browser context for multi-step PoW challenges
 - Retry on challenge: detects if FlareSolverr returned a challenge page and retries with session
-- Cloudflare challenge detection: identifies hashcash PoW and Turnstile challenge pages
-- Rate limiter: configurable max concurrent FlareSolverr requests
-- Health Check: verify FlareSolverr version and response time
-- Enabled Feeds list: see all feeds with the bypass enabled, clickable to open feed editor
 - Feed debugger integration: logs at `LOG_VERBOSE` why the plugin did or didn't act on each feed
 
 ## Requirements
@@ -42,16 +40,11 @@ Configure the following in Preferences → Feeds → Plugins → Cloudflare Bypa
 - **Plugin**: enable/disable the plugin globally
 - **FlareSolverr URL**: address of your FlareSolverr instance (default: `http://localhost:8191`)
 - **Max timeout**: maximum wait time in milliseconds (default: `60000`)
-- **Max concurrent requests**: limit parallel FlareSolverr requests (0 = unlimited, default: `3`)
-- **Health Check**: verify FlareSolverr is reachable and shows its version
-- **Reset Session**: create a fresh FlareSolverr browser session
-- **Enabled Feeds**: list of feeds with the bypass enabled, click to open feed editor
 
 ## Usage
 
 1. Right-click a feed → Edit → check "Fetch this feed via FlareSolverr (bypasses Cloudflare)".
 2. If FlareSolverr returns a challenge page, the plugin retries once after 3s using the persistent session. If it still fails, a warning is logged to the Event Log.
-3. Use the feed debugger (set to Verbose) to see `fu_cloudflare:` lines explaining what the plugin did.
 
 ## Troubleshooting
 
