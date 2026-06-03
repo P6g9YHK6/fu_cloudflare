@@ -5,11 +5,14 @@ Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 ## Features
 
 - Routes feed fetching through FlareSolverr to bypass Cloudflare JS challenges
-- Global mode: all feeds through FlareSolverr
-- Per-feed mode: enable only for specific feeds in the feed editor
-- Smart mode: auto-detects Cloudflare blocks and permanently enables FlareSolverr per-feed
-- Built-in connection tester to validate FlareSolverr is working
-- Configurable timeout per request
+- Per-feed toggle: enable only for specific feeds in the feed editor
+- FlareSolverr session management: persistent browser context for multi-step PoW challenges
+- Retry on challenge: detects if FlareSolverr returned a challenge page and retries with session
+- Cloudflare challenge detection: identifies hashcash PoW and Turnstile challenge pages
+- Rate limiter: configurable max concurrent FlareSolverr requests
+- Health Check: verify FlareSolverr version and response time
+- Enabled Feeds list: see all feeds with the bypass enabled, clickable to open feed editor
+- Feed debugger integration: logs at `LOG_VERBOSE` why the plugin did or didn't act on each feed
 
 ## Requirements
 
@@ -36,35 +39,36 @@ docker run -d --name flaresolverr -p 8191:8191 ghcr.io/flaresolverr/flaresolverr
 
 Configure the following in Preferences → Feeds → Plugins → Cloudflare Bypass:
 
+- **Plugin**: enable/disable the plugin globally
 - **FlareSolverr URL**: address of your FlareSolverr instance (default: `http://localhost:8191`)
 - **Max timeout**: maximum wait time in milliseconds (default: `60000`)
-- **Mode**: `Per feed`, `All feeds through FlareSolverr`, or `Smart mode`
-
-Use the **Test Connection** button to verify FlareSolverr is reachable and can fetch a feed URL.
+- **Max concurrent requests**: limit parallel FlareSolverr requests (0 = unlimited, default: `3`)
+- **Health Check**: verify FlareSolverr is reachable and shows its version
+- **Reset Session**: create a fresh FlareSolverr browser session
+- **Enabled Feeds**: list of feeds with the bypass enabled, click to open feed editor
 
 ## Usage
 
-### 1. Per-feed mode (default)
-
-Right-click a feed → Edit → check "Use FlareSolverr to fetch this feed".
-
-### 2. Global mode
-
-Enable "All feeds through FlareSolverr" in the plugin settings. Every feed update will be routed through FlareSolverr.
-
-### 3. Smart mode
-
-Enable "Smart mode" in the plugin settings. When a feed returns a Cloudflare block page, the plugin automatically detects it, re-fetches via FlareSolverr, and permanently saves the feed for future FlareSolverr routing. Subsequent updates use FlareSolverr directly (no double-fetch).
+1. Right-click a feed → Edit → check "Fetch this feed via FlareSolverr (bypasses Cloudflare)".
+2. If FlareSolverr returns a challenge page, the plugin retries once after 3s using the persistent session. If it still fails, a warning is logged to the Event Log.
+3. Use the feed debugger (set to Verbose) to see `fu_cloudflare:` lines explaining what the plugin did.
 
 ## Troubleshooting
 
 If feeds are still failing:
 
-1. Check FlareSolverr is running: `curl http://localhost:8191/v1`
-2. Verify the FlareSolverr URL in plugin settings
-3. Test with a known Cloudflare-protected feed URL using the built-in tester
-4. Check tt-rss logs for error messages
-5. Increase timeout if feeds are slow
+1. Check FlareSolverr is reachable via **Health Check** in plugin settings.
+2. Check the **Event Log** for `fu_cloudflare:` warning messages.
+3. Use the **feed debugger** at Verbose level (`?debug=1` in URL) to see `fu_cloudflare:` log lines.
+4. Click **Reset Session** to create a fresh browser context on FlareSolverr.
+5. Increase **Max timeout** if the PoW computation takes longer (try 120000ms).
+6. Check FlareSolverr logs: `docker logs flaresolverr`.
+7. Verify the feed has the checkbox enabled in its feed editor.
+
+## Limitations
+
+- FlareSolverr v3.x cannot detect or solve all Cloudflare challenge variants (e.g. hashcash SHA-256 PoW with `_hcc` cookie). The plugin detects these cases and logs a warning.
+- FlareSolverr sessions expire after inactivity. The plugin creates a new session automatically when needed.
 
 ## Acknowledgments
 
