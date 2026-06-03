@@ -113,23 +113,34 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
-			<h3><?= __('Test Connection') ?></h3>
-			<form dojoType='dijit.form.Form'>
-				<script type="dojo/method" event="onSubmit" args="evt">
-					evt.preventDefault();
-					Plugins.Fu_Cloudflare.testConnection();
-				</script>
-				<fieldset>
-					<label><?= __('Feed URL to test:') ?></label>
-					<input dojoType='dijit.form.TextBox' id='fu_test_url'
-						value='' style='width: 400px'
-						placeholder='https://example.com/rss'>
-				</fieldset>
-				<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testConnection()'>
-					<?= __('Test') ?>
-				</button>
-			</form>
-			<div id='fu_test_result'></div>
+			<h3><?= __('Enabled Feeds') ?></h3>
+			<?php
+				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+				if ($enabled_feeds) {
+					$ids = array_map('intval', $enabled_feeds);
+					$placeholders = implode(',', array_fill(0, count($ids), '?'));
+					$sth = $this->pdo->prepare(
+						"SELECT id, title, feed_url FROM ttrss_feeds WHERE id IN ($placeholders) ORDER BY title"
+					);
+					$sth->execute($ids);
+					$feeds = $sth->fetchAll();
+
+					if ($feeds) {
+						echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
+						foreach ($feeds as $f) {
+							$link = "prefs.php?op=prefFeeds&feed_id=" . (int)$f['id'];
+							echo "<li><a href='$link' target='_blank'>" . htmlspecialchars($f['title']) . "</a> " .
+								"<span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
+						}
+						echo "</ul>";
+						echo "<p class='text-muted'>" . count($feeds) . " " . __('feed(s) enabled.') . "</p>";
+					} else {
+						echo "<p class='text-muted'>" . __('Feed IDs found but no matching feeds in database.') . "</p>";
+					}
+				} else {
+					echo "<p class='text-muted'>" . __('No feeds enabled yet. Open a feed\'s editor and check "Fetch this feed via FlareSolverr".') . "</p>";
+				}
+			?>
 		</div>
 		<?php
 	}
@@ -152,63 +163,6 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		echo __("Data saved.");
-	}
-
-	function testConnection() : void {
-		$test_url = clean($_REQUEST["test_url"] ?? "");
-		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
-
-		if (!$test_url) {
-			echo json_encode(["error" => __("No URL provided.")]);
-			return;
-		}
-
-		$start = microtime(true);
-		$result = $this->fetch_via_flaresolverr($test_url, $flaresolverr_url);
-		$elapsed = round(microtime(true) - $start, 2);
-
-		if ($result['success']) {
-			$dom = new DOMDocument();
-			$feed_title = '';
-
-			if (@$dom->loadXML(mb_substr($result['data'], 0, 10000))) {
-				$xpath = new DOMXPath($dom);
-				$xpath->registerNamespace('atom', 'http://www.w3.org/2005/Atom');
-				$channel = $xpath->query('/rss/channel/title');
-				$feed_title = $channel->length > 0 ? trim($channel->item(0)->textContent) : '';
-				if (!$feed_title) {
-					$feed_title = $xpath->query('//atom:feed/atom:title')->length > 0
-						? trim($xpath->query('//atom:feed/atom:title')->item(0)->textContent) : '';
-				}
-			}
-
-			if (!$feed_title) {
-				if (preg_match('/<channel>.*?<title>(.*?)<\/title>/is', $result['data'], $m)) {
-					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
-				} elseif (preg_match('/<feed.*?>.*?<title[^>]*>(.*?)<\/title>/is', $result['data'], $m)) {
-					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
-				}
-			}
-
-			$size = strlen($result['data']);
-
-			Logger::log(E_USER_NOTICE, "fu_cloudflare: connection test OK — {$elapsed}s, {$size}B", $test_url);
-
-			echo json_encode([
-				"success" => true,
-				"time" => $elapsed,
-				"size" => $size,
-				"title" => $feed_title ?: __('(feed parsed, no title found)'),
-			]);
-		} else {
-			$error_msg = $result['error'] ?? __('Unknown error');
-			Logger::log(E_USER_WARNING, "fu_cloudflare: connection test FAILED — $error_msg", $test_url);
-
-			echo json_encode([
-				"success" => false,
-				"error" => $error_msg,
-			]);
-		}
 	}
 
 	function testFlareSolverr() : void {
