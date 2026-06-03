@@ -84,16 +84,21 @@ Plugins.Fu_Cloudflare = {
 
 				if (result.success && result.feeds) {
 					var html = "<table class='prefFeedList' style='width: auto'>" +
-						"<tr><th>Feed</th><th>HTTP</th><th>Challenge</th><th>Status</th></tr>";
+						"<tr><th>Feed</th><th>HTTP</th><th>Challenge</th><th>Override</th></tr>";
 
 					for (var i = 0; i < result.feeds.length; i++) {
 						var f = result.feeds[i];
 						var challenge = f.is_cloudflare ?
 							"<span class='text-warning'>Yes</span>" :
 							"<span class='text-success'>No</span>";
-						var status = f.already_enabled ?
-							"<span class='text-success'>Enabled</span>" :
-							"<span class='text-muted'>-</span>";
+						var status;
+						if (f.excluded) {
+							status = "<span class='text-warning'>Excluded</span>";
+						} else if (f.already_enabled) {
+							status = "<span class='text-success'>Include</span>";
+						} else {
+							status = "<span class='text-muted'>Default</span>";
+						}
 						html += "<tr>" +
 							"<td>" + f.title + "</td>" +
 							"<td>" + f.http_code + "</td>" +

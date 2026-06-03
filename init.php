@@ -277,37 +277,36 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
-			<h3><?= __('Enabled Feeds') ?></h3>
+			<h3><?= __('Feeds') ?></h3>
 			<?php
 				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-				if ($enabled_feeds) {
-					$ids = array_map('intval', $enabled_feeds);
-					$placeholders = implode(',', array_fill(0, count($ids), '?'));
+				$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+				$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
+				$all_feed_ids = array_map('intval', $all_feed_ids);
+
+				if ($all_feed_ids) {
+					$placeholders = implode(',', array_fill(0, count($all_feed_ids), '?'));
 					$sth = $this->pdo->prepare(
 						"SELECT id, title, feed_url FROM ttrss_feeds WHERE id IN ($placeholders) ORDER BY title"
 					);
-					$sth->execute($ids);
-					$feeds = $sth->fetchAll();
+					$sth->execute($all_feed_ids);
 
-					if ($feeds) {
-						echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
-						foreach ($feeds as $f) {
-							$session_info = '';
-							if ($per_feed === "1") {
-								$sk = $this->host->get($this, "session_id_" . $f['id'], "");
-								$session_info = $sk ? ' <span class=\"text-success\">[session]</span>' : ' <span class=\"text-muted\">[no session]</span>';
-							}
-							echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
-								$session_info .
-								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
+					echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
+					foreach ($sth as $f) {
+						$icon = '';
+						if (in_array($f['id'], $enabled_feeds)) {
+							$icon = ' <span class=\"text-success\">[✓]</span>';
+						} elseif (in_array($f['id'], $excluded_feeds)) {
+							$icon = ' <span class=\"text-warning\">[✗]</span>';
 						}
-						echo "</ul>";
-						echo "<p class='text-muted'>" . count($feeds) . " " . __('feed(s) enabled.') . "</p>";
-					} else {
-						echo "<p class='text-muted'>" . __('Feed IDs found but no matching feeds in database.') . "</p>";
+						echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
+							$icon .
+							" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 					}
+					echo "</ul>";
+					echo "<p class='text-muted'>" . count($enabled_feeds) . " " . __('included,') . " " . count($excluded_feeds) . " " . __('excluded') . "</p>";
 				} else {
-					echo "<p class='text-muted'>" . __('No feeds enabled yet. Open a feed\'s editor and check "Fetch this feed via FlareSolverr".') . "</p>";
+					echo "<p class='text-muted'>" . __('No feeds configured. Open a feed\'s editor to set per-feed FlareSolverr behavior.') . "</p>";
 				}
 			?>
 
@@ -482,14 +481,26 @@ class Fu_Cloudflare extends Plugin {
 
 	function hook_prefs_edit_feed($feed_id) {
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+		$current = 'default';
+		if (in_array($feed_id, $enabled_feeds)) $current = 'include';
+		if (in_array($feed_id, $excluded_feeds)) $current = 'exclude';
 		?>
 		<header><?= __('Cloudflare Bypass') ?></header>
 		<section>
 			<fieldset>
-				<label class='checkbox'>
-					<?= \Controls\checkbox_tag("fu_cloudflare_enabled", in_array($feed_id, $enabled_feeds)) ?>
-					<?= __('Fetch this feed via FlareSolverr (bypasses Cloudflare)') ?>
-				</label>
+				<label><?= __('FlareSolverr:') ?></label>
+				<select dojoType='dijit.form.Select' name='fu_cloudflare_mode'>
+					<option value='' <?= $current == 'default' ? 'selected="selected"' : '' ?>>
+						<?= __('Default (use global mode)') ?>
+					</option>
+					<option value='include' <?= $current == 'include' ? 'selected="selected"' : '' ?>>
+						<?= __('Always bypass via FlareSolverr') ?>
+					</option>
+					<option value='exclude' <?= $current == 'exclude' ? 'selected="selected"' : '' ?>>
+						<?= __('Never use FlareSolverr') ?>
+					</option>
+				</select>
 			</fieldset>
 		</section>
 		<?php
@@ -497,16 +508,22 @@ class Fu_Cloudflare extends Plugin {
 
 	function hook_prefs_save_feed($feed_id) {
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		$enable = checkbox_to_sql_bool($_POST["fu_cloudflare_enabled"] ?? "");
-		$key = array_search($feed_id, $enabled_feeds);
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+		$val = $_POST["fu_cloudflare_mode"] ?? '';
 
-		if ($enable) {
-			if ($key === false) array_push($enabled_feeds, $feed_id);
-		} else {
-			if ($key !== false) unset($enabled_feeds[$key]);
+		$ek = array_search($feed_id, $enabled_feeds);
+		if ($ek !== false) unset($enabled_feeds[$ek]);
+		$xk = array_search($feed_id, $excluded_feeds);
+		if ($xk !== false) unset($excluded_feeds[$xk]);
+
+		if ($val === 'include') {
+			array_push($enabled_feeds, $feed_id);
+		} elseif ($val === 'exclude') {
+			array_push($excluded_feeds, $feed_id);
 		}
 
 		$this->host->set($this, "enabled_feeds", $enabled_feeds);
+		$this->host->set($this, "excluded_feeds", $excluded_feeds);
 	}
 
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
@@ -524,6 +541,12 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+
+		if (in_array($feed, $excluded_feeds)) {
+			Debug::log("fu_cloudflare: feed $feed excluded", Debug::LOG_VERBOSE);
+			return $feed_data;
+		}
 
 		if ($mode === "per_feed") {
 			if (!in_array($feed, $enabled_feeds)) {
@@ -725,8 +748,11 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		if ($mode === 'cookies') {
-			$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-			foreach ($enabled_feeds as $fid) {
+			$all = array_merge(
+				$this->host->get_array($this, "enabled_feeds"),
+				$this->host->get_array($this, "excluded_feeds")
+			);
+			foreach ($all as $fid) {
 				$this->host->set($this, "cookies_$fid", "");
 				$this->host->set($this, "ua_$fid", "");
 			}
@@ -743,6 +769,7 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
 		$sth = $this->pdo->query("SELECT id, title, feed_url FROM ttrss_feeds ORDER BY title");
 
 		$multi = curl_multi_init();
@@ -762,6 +789,7 @@ class Fu_Cloudflare extends Plugin {
 				'id' => $row['id'],
 				'title' => $row['title'],
 				'already_enabled' => in_array($row['id'], $enabled_feeds),
+				'excluded' => in_array($row['id'], $excluded_feeds),
 			];
 		}
 
@@ -785,6 +813,7 @@ class Fu_Cloudflare extends Plugin {
 				'http_code' => $http_code,
 				'is_cloudflare' => $body ? $this->is_cloudflare_challenge($body) : false,
 				'already_enabled' => $info['already_enabled'],
+				'excluded' => $info['excluded'],
 			];
 		}
 
