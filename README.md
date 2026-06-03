@@ -3,6 +3,7 @@
 Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 
 <img width="803" height="847" alt="image" src="https://github.com/user-attachments/assets/01953e77-b860-46d9-8628-35d52aef9a50" />
+<img width="493" height="279" alt="image" src="https://github.com/user-attachments/assets/68c01ae6-2a2c-41ac-89cb-ddba9a7ded92" />
 
 ## Features
 
