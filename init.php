@@ -284,20 +284,31 @@ class Fu_Cloudflare extends Plugin {
 
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
 		$enabled = $this->host->get($this, "enabled", "1");
-		if ($enabled !== "1") return $feed_data;
+		if ($enabled !== "1") {
+			Debug::log("fu_cloudflare: plugin disabled", Debug::LOG_VERBOSE);
+			return $feed_data;
+		}
 
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
-		if (!$flaresolverr_url) return $feed_data;
+		if (!$flaresolverr_url) {
+			Debug::log("fu_cloudflare: FlareSolverr URL not configured", Debug::LOG_VERBOSE);
+			return $feed_data;
+		}
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		if (!in_array($feed, $enabled_feeds)) return $feed_data;
+		if (!in_array($feed, $enabled_feeds)) {
+			Debug::log("fu_cloudflare: feed $feed not in enabled list", Debug::LOG_VERBOSE);
+			return $feed_data;
+		}
 
+		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
 		if ($result !== false) {
-			Logger::log(E_USER_NOTICE, "fu_cloudflare: fetched feed $feed via FlareSolverr", $fetch_url);
+			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
 			return $result;
 		}
 
+		Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed, returning original data", Debug::LOG_VERBOSE);
 		return $feed_data;
 	}
 
