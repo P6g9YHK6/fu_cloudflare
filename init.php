@@ -128,8 +128,8 @@ class Fu_Cloudflare extends Plugin {
 					if ($feeds) {
 						echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
 						foreach ($feeds as $f) {
-							$link = "prefs.php?op=prefFeeds&feed_id=" . (int)$f['id'];
-							echo "<li><a href='$link' target='_blank'>" . htmlspecialchars($f['title']) . "</a> " .
+							$fid = (int)$f['id'];
+							echo "<li><a href='#' onclick='App.openInTab(\"prefs\", \"prefFeeds\", {feed_id: $fid}); return false;'>" . htmlspecialchars($f['title']) . "</a> " .
 								"<span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 						}
 						echo "</ul>";
