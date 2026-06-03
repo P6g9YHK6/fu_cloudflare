@@ -2,6 +2,7 @@
 class Fu_Cloudflare extends Plugin {
 
 	private $host;
+	private $last_fetch_error = null;
 
 	function about() {
 		return array(null,
@@ -39,6 +40,8 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
+		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
+		$stats = $this->get_stats();
 		?>
 		<div dojoType='dijit.layout.AccordionPane'
 			title="<i class='material-icons'>flash_on</i> <?= __('Cloudflare Bypass (fu_cloudflare)') ?>">
@@ -87,13 +90,33 @@ class Fu_Cloudflare extends Plugin {
 						title='<?= __('0 = unlimited') ?>'>
 				</fieldset>
 
+				<fieldset>
+					<label class='checkbox'>
+						<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
+						<?= __('Per-feed sessions (each feed gets its own browser context)') ?>
+					</label>
+				</fieldset>
+
 				<?= \Controls\submit_tag(__("Save")) ?>
 			</form>
 
 			<hr/>
 
+			<h3><?= __('Statistics') ?></h3>
+			<table class='prefFeedList' style='width: auto'>
+				<tr><td><?= __('Successful fetches:') ?></td><td><strong><?= $stats['requests_ok'] ?></strong></td></tr>
+				<tr><td><?= __('Challenge pages returned:') ?></td><td><strong><?= $stats['requests_challenge'] ?></strong></td></tr>
+				<tr><td><?= __('Errors:') ?></td><td><strong><?= $stats['requests_failed'] ?></strong></td></tr>
+				<tr><td><?= __('Rate-limited:') ?></td><td><strong><?= $stats['requests_ratelimited'] ?></strong></td></tr>
+			</table>
+			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetStats()'>
+				<?= __('Reset Statistics') ?>
+			</button>
+
+			<hr/>
+
 			<h3><?= __('FlareSolverr Session') ?></h3>
-			<p class='text-muted'><?= __('FlareSolverr uses a browser session to solve multi-step challenges. A persistent session allows the JavaScript PoW to complete in the background.') ?></p>
+			<p class='text-muted'><?= __('A persistent browser session allows JavaScript PoW to complete across requests.') ?></p>
 			<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
 				<?= $this->host->get($this, "session_id", "") ? __('Active') : __('None') ?>
 			</span></p>
@@ -113,6 +136,20 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
+			<h3><?= __('Test Feed Fetch') ?></h3>
+			<p class='text-muted'><?= __('Fetch a feed URL through FlareSolverr to test if it can bypass Cloudflare.') ?></p>
+			<div style='margin-bottom: 8px'>
+				<input dojoType='dijit.form.TextBox' id='fu_test_url'
+					value='https://sarahcandersen.com/rss' style='width: 400px'
+					placeholder='https://sarahcandersen.com/rss'>
+			</div>
+			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFetchFeed()'>
+				<?= __('Test Fetch') ?>
+			</button>
+			<div id='fu_test_result' style='margin-top: 8px'></div>
+
+			<hr/>
+
 			<h3><?= __('Enabled Feeds') ?></h3>
 			<?php
 				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
@@ -128,8 +165,14 @@ class Fu_Cloudflare extends Plugin {
 					if ($feeds) {
 						echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
 						foreach ($feeds as $f) {
-							echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a> " .
-								"<span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
+							$session_info = '';
+							if ($per_feed === "1") {
+								$sk = $this->host->get($this, "session_id_" . $f['id'], "");
+								$session_info = $sk ? ' <span class=\"text-success\">[session]</span>' : ' <span class=\"text-muted\">[no session]</span>';
+							}
+							echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
+								$session_info .
+								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 						}
 						echo "</ul>";
 						echo "<p class='text-muted'>" . count($feeds) . " " . __('feed(s) enabled.') . "</p>";
@@ -140,6 +183,15 @@ class Fu_Cloudflare extends Plugin {
 					echo "<p class='text-muted'>" . __('No feeds enabled yet. Open a feed\'s editor and check "Fetch this feed via FlareSolverr".') . "</p>";
 				}
 			?>
+
+			<hr/>
+
+			<h3><?= __('Scan Feeds') ?></h3>
+			<p class='text-muted'><?= __('Check all feeds for Cloudflare challenges. Feeds returning a challenge can then be enabled in their feed editor.') ?></p>
+			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.scanFeeds()'>
+				<?= __('Scan All Feeds') ?>
+			</button>
+			<div id='fu_scan_result' style='margin-top: 8px'></div>
 		</div>
 		<?php
 	}
@@ -149,6 +201,7 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = clean($_POST["flaresolverr_url"] ?? "");
 		$max_timeout = (int)($_POST["max_timeout"] ?? 60000);
 		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
+		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 
 		$prev_enabled = $this->host->get($this, "enabled", "1");
 
@@ -156,6 +209,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
 		$this->host->set($this, "max_concurrent", $max_concurrent);
+		$this->host->set($this, "per_feed_sessions", $per_feed);
 
 		if ($prev_enabled !== $enabled) {
 			Logger::log(E_USER_NOTICE, "fu_cloudflare: " . ($enabled === "1" ? "enabled" : "disabled"));
@@ -218,6 +272,43 @@ class Fu_Cloudflare extends Plugin {
 		echo json_encode(["success" => false, "error" => "FlareSolverr returned HTTP $http_code"]);
 	}
 
+	function testFetchFeed() : void {
+		$url = clean($_POST['test_url'] ?? '');
+		if (!$url) {
+			$url = 'https://sarahcandersen.com/rss';
+		}
+
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
+		if (!$flaresolverr_url) {
+			echo json_encode(["success" => false, "error" => __("FlareSolverr URL is not configured.")]);
+			return;
+		}
+
+		$start = microtime(true);
+		$session = $this->get_session($flaresolverr_url);
+		$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session);
+		$elapsed = round(microtime(true) - $start, 2);
+
+		if ($result['success']) {
+			$challenge = $this->is_cloudflare_challenge($result['data']);
+			echo json_encode([
+				"success" => true,
+				"time" => $elapsed,
+				"challenge_detected" => $challenge,
+				"body_size" => strlen($result['data']),
+				"status" => $challenge ? "Cloudflare challenge page returned" : "OK",
+				"user_agent" => $result['user_agent'],
+				"cookies_count" => $result['cookies_count'],
+			]);
+		} else {
+			echo json_encode([
+				"success" => false,
+				"time" => $elapsed,
+				"error" => $result['error'],
+			]);
+		}
+	}
+
 	function hook_prefs_edit_feed($feed_id) {
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
 		?>
@@ -266,33 +357,67 @@ class Fu_Cloudflare extends Plugin {
 			return $feed_data;
 		}
 
-		$session = $this->get_session($flaresolverr_url);
+		$session = $this->get_session($flaresolverr_url, $feed);
 		if ($session) {
-			Debug::log("fu_cloudflare: using FlareSolverr session $session", Debug::LOG_VERBOSE);
+			Debug::log("fu_cloudflare: using session $session", Debug::LOG_VERBOSE);
 		}
 
 		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+
 		if ($result !== false) {
 			if ($this->is_cloudflare_challenge($result)) {
-				Debug::log("fu_cloudflare: challenge present, retrying with session after 3s...", Debug::LOG_VERBOSE);
+				$backup_timeout = (int)$this->host->get($this, "max_timeout", 60000);
+				$doubled = min($backup_timeout * 2, 300000);
+				$this->host->set($this, "max_timeout", $doubled);
+				Debug::log("fu_cloudflare: challenge present, retry with session after 3s (timeout: {$doubled}ms)...", Debug::LOG_VERBOSE);
 				sleep(3);
 				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+				$this->host->set($this, "max_timeout", $backup_timeout);
 
 				if ($result !== false && !$this->is_cloudflare_challenge($result)) {
+					$this->increment_stat('stats_requests_ok');
 					Debug::log("fu_cloudflare: retry OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
 					return $result;
 				}
 
+				Debug::log("fu_cloudflare: still challenge, trying fresh session...", Debug::LOG_VERBOSE);
+				$this->host->set($this, $this->get_session_key($feed), "");
+				$session = $this->get_session($flaresolverr_url, $feed);
+				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+
+				if ($result !== false && !$this->is_cloudflare_challenge($result)) {
+					$this->increment_stat('stats_requests_ok');
+					Debug::log("fu_cloudflare: fresh session OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+					return $result;
+				}
+
+				$this->increment_stat('stats_requests_challenge');
 				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
 				Debug::log($msg, Debug::LOG_VERBOSE);
 				Logger::log(E_USER_WARNING, $msg, $fetch_url);
-			} else {
-				Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+				return $result;
 			}
+
+			$this->increment_stat('stats_requests_ok');
+			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
 			return $result;
 		}
 
+		if (!empty($this->last_fetch_error['session_error'])) {
+			Debug::log("fu_cloudflare: session expired, creating fresh session...", Debug::LOG_VERBOSE);
+			$this->host->set($this, $this->get_session_key($feed), "");
+			$session = $this->get_session($flaresolverr_url, $feed);
+			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+			if ($result !== false) {
+				$label = $this->is_cloudflare_challenge($result) ? "challenge" : "OK";
+				Debug::log("fu_cloudflare: fresh session $label (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+				if (!$this->is_cloudflare_challenge($result)) $this->increment_stat('stats_requests_ok');
+				return $result;
+			}
+		}
+
+		$this->increment_stat('stats_requests_failed');
 		Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed, returning original data", Debug::LOG_VERBOSE);
 		return $feed_data;
 	}
@@ -304,8 +429,37 @@ class Fu_Cloudflare extends Plugin {
 		return false;
 	}
 
-	private function get_session($flaresolverr_url) {
-		$session = $this->host->get($this, "session_id", "");
+	private function increment_stat($key) {
+		$val = (int)$this->host->get($this, $key, 0);
+		$this->host->set($this, $key, $val + 1);
+	}
+
+	private function get_stats() {
+		return [
+			'requests_ok' => (int)$this->host->get($this, 'stats_requests_ok', 0),
+			'requests_challenge' => (int)$this->host->get($this, 'stats_requests_challenge', 0),
+			'requests_failed' => (int)$this->host->get($this, 'stats_requests_failed', 0),
+			'requests_ratelimited' => (int)$this->host->get($this, 'stats_requests_ratelimited', 0),
+		];
+	}
+
+	function resetStats() : void {
+		foreach (['stats_requests_ok', 'stats_requests_challenge', 'stats_requests_failed', 'stats_requests_ratelimited'] as $k) {
+			$this->host->set($this, $k, 0);
+		}
+		echo json_encode(["success" => true]);
+	}
+
+	private function get_session_key($feed = null) {
+		if ($this->host->get($this, "per_feed_sessions", "0") === "1" && $feed !== null) {
+			return "session_id_$feed";
+		}
+		return "session_id";
+	}
+
+	private function get_session($flaresolverr_url, $feed = null) {
+		$key = $this->get_session_key($feed);
+		$session = $this->host->get($this, $key, "");
 		if ($session) return $session;
 
 		$ch = curl_init();
@@ -322,7 +476,7 @@ class Fu_Cloudflare extends Plugin {
 		if ($http_code == 200 && $response) {
 			$data = json_decode($response, true);
 			if (isset($data['session'])) {
-				$this->host->set($this, "session_id", $data['session']);
+				$this->host->set($this, $key, $data['session']);
 				Debug::log("fu_cloudflare: created session {$data['session']}", Debug::LOG_VERBOSE);
 				return $data['session'];
 			}
@@ -331,25 +485,94 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function resetSession() : void {
-		$this->host->set($this, "session_id", "");
-		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
-		if ($flaresolverr_url) {
-			$session = $this->get_session($flaresolverr_url);
-			echo json_encode(["success" => true, "session" => $session ?: ""]);
-		} else {
-			echo json_encode(["success" => false, "error" => __("FlareSolverr URL not configured")]);
+		if ($this->host->get($this, "per_feed_sessions", "0") === "1") {
+			$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+			foreach ($enabled_feeds as $fid) {
+				$this->host->set($this, "session_id_$fid", "");
+			}
 		}
+		$this->host->set($this, "session_id", "");
+		echo json_encode(["success" => true, "message" => __("Session(s) cleared. New sessions created on next feed fetch.")]);
+	}
+
+	function scanFeeds() : void {
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
+		if (!$flaresolverr_url) {
+			echo json_encode(["success" => false, "error" => __("Configure FlareSolverr URL first.")]);
+			return;
+		}
+
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$sth = $this->pdo->query("SELECT id, title, feed_url FROM ttrss_feeds ORDER BY title");
+
+		$multi = curl_multi_init();
+		$handles = [];
+		$feed_map = [];
+
+		foreach ($sth as $row) {
+			$ch = curl_init();
+			curl_setopt($ch, CURLOPT_URL, $row['feed_url']);
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+			curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (compatible; tt-rss)');
+			curl_multi_add_handle($multi, $ch);
+			$handles[(int)$ch] = $ch;
+			$feed_map[(int)$ch] = [
+				'id' => $row['id'],
+				'title' => $row['title'],
+				'already_enabled' => in_array($row['id'], $enabled_feeds),
+			];
+		}
+
+		$running = null;
+		do {
+			curl_multi_exec($multi, $running);
+			if ($running > 0) curl_multi_select($multi, 5);
+		} while ($running > 0);
+
+		$results = [];
+		foreach ($handles as $id => $ch) {
+			$info = $feed_map[$id];
+			$body = curl_multi_getcontent($ch);
+			$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			curl_multi_remove_handle($multi, $ch);
+			curl_close($ch);
+
+			$results[] = [
+				'id' => $info['id'],
+				'title' => $info['title'],
+				'http_code' => $http_code,
+				'is_cloudflare' => $body ? $this->is_cloudflare_challenge($body) : false,
+				'already_enabled' => $info['already_enabled'],
+			];
+		}
+
+		curl_multi_close($multi);
+		echo json_encode(["success" => true, "feeds" => $results]);
 	}
 
 	private function fetch_with_rate_limit($url, $flaresolverr_url, $session = null) {
+		$this->last_fetch_error = null;
 		if ($this->acquire_flaresolverr_slot()) {
 			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session);
 			$this->release_flaresolverr_slot();
 			if ($result['success']) {
+				if (!empty($result['user_agent']) || !empty($result['challenge_solved'])) {
+					Debug::log(sprintf(
+						"fu_cloudflare: meta — solved=%s, ua=%s, cookies=%d",
+						!empty($result['challenge_solved']) ? 'true' : 'false',
+						$result['user_agent'] ?? '-',
+						$result['cookies_count'] ?? 0
+					), Debug::LOG_VERBOSE);
+				}
 				return $result['data'];
 			}
+			$this->last_fetch_error = $result;
 			Logger::log(E_USER_WARNING, "fu_cloudflare: FlareSolverr error for $url — " . ($result['error'] ?? 'unknown'));
 		} else {
+			$this->last_fetch_error = ['session_error' => false, 'error' => 'rate_limit'];
+			$this->increment_stat('stats_requests_ratelimited');
 			Logger::log(E_USER_WARNING, "fu_cloudflare: rate limit reached, skipped feed", $url);
 		}
 		return false;
@@ -423,10 +646,17 @@ class Fu_Cloudflare extends Plugin {
 		if ($http_code == 200 && $response) {
 			$data = json_decode($response, true);
 			if (isset($data['solution']['response'])) {
-				return ['success' => true, 'data' => $data['solution']['response']];
+				return [
+					'success' => true,
+					'data' => $data['solution']['response'],
+					'challenge_solved' => !empty($data['solution']['challenge']),
+					'user_agent' => $data['solution']['userAgent'] ?? '',
+					'cookies_count' => count($data['solution']['cookies'] ?? []),
+				];
 			}
 			if (isset($data['error'])) {
-				return ['success' => false, 'error' => $data['error']];
+				$is_session_error = str_contains($data['error'], 'Session not found');
+				return ['success' => false, 'error' => $data['error'], 'session_error' => $is_session_error];
 			}
 			return ['success' => false, 'error' => "HTTP $http_code: FlareSolverr returned no solution"];
 		}

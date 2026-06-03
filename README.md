@@ -11,6 +11,7 @@ Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 - FlareSolverr session management: persistent browser context for multi-step PoW challenges
 - Retry on challenge: detects if FlareSolverr returned a challenge page and retries with session
 - Feed debugger integration: logs at `LOG_VERBOSE` why the plugin did or didn't act on each feed
+- Test Feed Fetch: try any feed URL through FlareSolverr from the settings page to verify bypass works
 
 ## Requirements
 
@@ -40,6 +41,7 @@ Configure the following in Preferences → Feeds → Plugins → Cloudflare Bypa
 - **Plugin**: enable/disable the plugin globally
 - **FlareSolverr URL**: address of your FlareSolverr instance (default: `http://localhost:8191`)
 - **Max timeout**: maximum wait time in milliseconds (default: `60000`)
+- **Test Feed Fetch**: enter any feed URL and click "Test Fetch" to verify FlareSolverr can bypass Cloudflare for that URL
 
 ## Usage
 

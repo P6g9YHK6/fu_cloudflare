@@ -29,6 +29,49 @@ Plugins.Fu_Cloudflare = {
 		});
 	},
 
+	testFetchFeed: function() {
+		Notify.progress('Fetching feed via FlareSolverr...', true);
+
+		var url = document.getElementById("fu_test_url").value;
+		if (!url) {
+			document.getElementById("fu_test_result").innerHTML = "<div class='notice alert alert-warning'>Please enter a URL.</div>";
+			return;
+		}
+
+		xhr.post("backend.php", {
+			op: "PluginHandler",
+			plugin: "fu_cloudflare",
+			method: "testFetchFeed",
+			test_url: url
+		}, function(reply) {
+			var div = document.getElementById("fu_test_result");
+
+			try {
+				var result = JSON.parse(reply);
+
+				if (result.success) {
+					var challengeInfo = result.challenge_detected ?
+						"<span class='text-warning'>Challenge detected!</span>" :
+						"<span class='text-success'>No challenge detected</span>";
+					div.innerHTML = "<div class='notice alert alert-info'>" +
+						"<strong>Result:</strong> " + challengeInfo + "<br/>" +
+						"<strong>Time:</strong> " + result.time + "s<br/>" +
+						"<strong>Response size:</strong> " + result.body_size + " bytes<br/>" +
+						(result.user_agent ? "<strong>User-Agent:</strong> " + result.user_agent + "<br/>" : "") +
+						(result.cookies_count !== undefined ? "<strong>Cookies:</strong> " + result.cookies_count : "") +
+						"</div>";
+				} else {
+					div.innerHTML = "<div class='notice alert alert-warning'>" +
+						"<strong>Error:</strong> " + result.error +
+						" (" + result.time + "s)" +
+						"</div>";
+				}
+			} catch(e) {
+				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
+			}
+		});
+	},
+
 	testFlareSolverr: function() {
 		Notify.progress('Testing FlareSolverr...', true);
 
