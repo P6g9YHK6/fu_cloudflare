@@ -419,7 +419,6 @@ class Fu_Cloudflare extends Plugin {
 				$this->increment_stat('stats_requests_challenge');
 				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
 				Debug::log($msg, Debug::LOG_VERBOSE);
-				Logger::log(E_USER_WARNING, $msg, $fetch_url);
 				return $result;
 			}
 
@@ -593,11 +592,9 @@ class Fu_Cloudflare extends Plugin {
 				return $result['data'];
 			}
 			$this->last_fetch_error = $result;
-			Logger::log(E_USER_WARNING, "fu_cloudflare: FlareSolverr error for $url — " . ($result['error'] ?? 'unknown'));
 		} else {
 			$this->last_fetch_error = ['session_error' => false, 'error' => 'rate_limit'];
 			$this->increment_stat('stats_requests_ratelimited');
-			Logger::log(E_USER_WARNING, "fu_cloudflare: rate limit reached, skipped feed", $url);
 		}
 		return false;
 	}
