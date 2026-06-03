@@ -127,64 +127,6 @@ class Fu_Cloudflare extends Plugin {
 						});
 					}
 				});
-
-				window.Plugins = window.Plugins || {};
-				window.Plugins.Fu_Cloudflare = {
-					testConnection: function() {
-						var url = dijit.byId("fu_test_url").get("value");
-						if (!url) { alert("Enter a URL to test."); return; }
-						Notify.progress('Testing FlareSolverr connection...', true);
-						xhr.post("backend.php", {
-							op: "PluginHandler", plugin: "fu_cloudflare", method: "testConnection", test_url: url
-						}, function(reply) {
-							var div = document.getElementById("fu_test_result");
-							try {
-								var result = JSON.parse(reply);
-								if (result.success) {
-									div.innerHTML = "<div class='notice alert alert-info'><strong>Success!</strong> " +
-										result.time + "s, " + result.size + " bytes" +
-										(result.title ? "<br>Feed: " + result.title : "") + "</div>";
-								} else {
-									div.innerHTML = "<div class='notice alert alert-warning'><strong>Error:</strong> " + result.error + "</div>";
-								}
-							} catch(e) { div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>"; }
-						});
-					},
-					testFlareSolverr: function() {
-						Notify.progress('Testing FlareSolverr...', true);
-						xhr.post("backend.php", {
-							op: "PluginHandler", plugin: "fu_cloudflare", method: "testFlareSolverr"
-						}, function(reply) {
-							var div = document.getElementById("fu_flaresolverr_result");
-							try {
-								var result = JSON.parse(reply);
-								if (result.success) {
-									div.innerHTML = "<div class='notice alert alert-info'><strong>FlareSolverr is reachable!</strong> " +
-										"v" + result.version + ", " + result.time + "s response time</div>";
-								} else {
-									div.innerHTML = "<div class='notice alert alert-warning'><strong>Error:</strong> " + result.error + "</div>";
-								}
-							} catch(e) { div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>"; }
-						});
-					},
-					purgeSmartList: function() {
-						Notify.progress('Purging smart-added feeds...', true);
-						xhr.post("backend.php", {
-							op: "PluginHandler", plugin: "fu_cloudflare", method: "clearSmartList"
-						}, function(reply) {
-							var div = document.getElementById("fu_purge_result");
-							try {
-								var result = JSON.parse(reply);
-								if (result.success) {
-									div.innerHTML = "<div class='notice alert alert-info'>" + result.message + "</div>";
-									Plugins.reload();
-								} else {
-									div.innerHTML = "<div class='notice alert alert-warning'><strong>Error:</strong> " + result.error + "</div>";
-								}
-							} catch(e) { div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>"; }
-						});
-					}
-				};
 			</script>
 
 			<hr/>
@@ -287,13 +229,10 @@ class Fu_Cloudflare extends Plugin {
 		$elapsed = round(microtime(true) - $start, 2);
 
 		if ($result['success']) {
-			$data = $result['data'];
-			$size = strlen($data);
+			$dom = new DOMDocument();
 			$feed_title = '';
 
-			$dom = new DOMDocument();
-			libxml_use_internal_errors(true);
-			if ($dom->loadXML($data)) {
+			if (@$dom->loadXML(mb_substr($result['data'], 0, 10000))) {
 				$xpath = new DOMXPath($dom);
 				$xpath->registerNamespace('atom', 'http://www.w3.org/2005/Atom');
 				$channel = $xpath->query('/rss/channel/title');
@@ -302,20 +241,9 @@ class Fu_Cloudflare extends Plugin {
 					$feed_title = $xpath->query('//atom:feed/atom:title')->length > 0
 						? trim($xpath->query('//atom:feed/atom:title')->item(0)->textContent) : '';
 				}
-			} else {
-				foreach (libxml_get_errors() as $err) {
-					Logger::log(E_USER_WARNING, "fu_cloudflare: XML parse error — line {$err->line}, col {$err->column}: {$err->message}", $test_url);
-				}
-				libxml_clear_errors();
 			}
 
-			if (!$feed_title) {
-				if (preg_match('/<channel>.*?<title>(.*?)<\/title>/is', $data, $m)) {
-					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
-				} elseif (preg_match('/<feed.*?>.*?<title[^>]*>(.*?)<\/title>/is', $data, $m)) {
-					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
-				}
-			}
+			$size = strlen($result['data']);
 
 			Logger::log(E_USER_NOTICE, "fu_cloudflare: connection test OK — {$elapsed}s, {$size}B", $test_url);
 

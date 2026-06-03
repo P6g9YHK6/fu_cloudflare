@@ -1,4 +1,3 @@
-var Plugins = Plugins || {};
 Plugins.Fu_Cloudflare = {
 
 	testConnection: function() {
