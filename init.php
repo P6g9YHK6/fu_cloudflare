@@ -20,8 +20,6 @@ class Fu_Cloudflare extends Plugin {
 
 		$host->add_hook($host::HOOK_FETCH_FEED, $this);
 		$host->add_hook($host::HOOK_PREFS_TAB, $this);
-		$host->add_hook($host::HOOK_PREFS_EDIT_FEED, $this);
-		$host->add_hook($host::HOOK_PREFS_SAVE_FEED, $this);
 	}
 
 	function get_js() {
@@ -39,11 +37,6 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
-		$mode = $this->host->get($this, "mode", "per_feed");
-		$smart_expiry_hours = (int)$this->host->get($this, "smart_expiry_hours", 720);
-		$enabled_feeds = $this->filter_unknown_feeds($this->host->get_array($this, "enabled_feeds"));
-		$smart_added = json_decode($this->host->get($this, "smart_added_feeds", "{}"), true) ?: [];
-		$this->host->set($this, "enabled_feeds", $enabled_feeds);
 		?>
 		<div dojoType='dijit.layout.AccordionPane'
 			title="<i class='material-icons'>flash_on</i> <?= __('Cloudflare Bypass (fu_cloudflare)') ?>">
@@ -92,42 +85,8 @@ class Fu_Cloudflare extends Plugin {
 						title='<?= __('0 = unlimited') ?>'>
 				</fieldset>
 
-				<fieldset>
-					<label><?= __('Mode:') ?></label>
-					<select dojoType='dijit.form.Select' id='fu_mode_select' name='mode'>
-						<option value='per_feed' <?= $mode == 'per_feed' ? 'selected="selected"' : '' ?>>
-							<?= __('Per feed (configure in feed editor)') ?>
-						</option>
-						<option value='global' <?= $mode == 'global' ? 'selected="selected"' : '' ?>>
-							<?= __('All feeds through FlareSolverr') ?>
-						</option>
-						<option value='smart' <?= $mode == 'smart' ? 'selected="selected"' : '' ?>>
-							<?= __('Smart mode (auto-detect Cloudflare block)') ?>
-						</option>
-					</select>
-				</fieldset>
-
-				<fieldset id='fu_smart_settings' style='<?= $mode != 'smart' ? 'display:none' : '' ?>'>
-					<label><?= __('Smart mode: retry normal fetch after (hours):') ?></label>
-					<input dojoType='dijit.form.NumberSpinner' name='smart_expiry_hours'
-						value='<?= $smart_expiry_hours ?>' smallDelta='24' min='0' max='87600'
-						title='<?= __('0 = never retry') ?>'>
-				</fieldset>
-
 				<?= \Controls\submit_tag(__("Save")) ?>
 			</form>
-
-			<script type="dojo/method">
-				require(["dojo/query", "dojo/on", "dojo/dom-form"], function(query, on) {
-					var modeSelect = dijit.byId("fu_mode_select");
-					if (modeSelect) {
-						on(modeSelect, "change", function(val) {
-							dijit.byId("fu_smart_settings").domNode.style.display =
-								val == "smart" ? "" : "none";
-						});
-					}
-				});
-			</script>
 
 			<hr/>
 
@@ -157,36 +116,6 @@ class Fu_Cloudflare extends Plugin {
 				</button>
 			</form>
 			<div id='fu_test_result'></div>
-
-			<hr/>
-
-			<h3><?= __('Smart Mode') ?></h3>
-			<p class='text-muted'><?= __('Feeds auto-added by smart mode will be re-tried without FlareSolverr after the configured expiry period.') ?></p>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.purgeSmartList()'>
-				<?= __('Purge smart-added feeds') ?>
-			</button>
-			<div id='fu_purge_result' style='margin-top: 8px'></div>
-
-			<?php if (count($enabled_feeds) > 0) { ?>
-				<hr/>
-				<h3><?= __('Currently enabled for:') ?></h3>
-				<ul class='panel panel-scrollable list list-unstyled'>
-					<?php foreach ($enabled_feeds as $f) { ?>
-						<li>
-							<?php if (Feeds::_has_icon($f)) { ?>
-								<img src='<?= Feeds::_get_icon_url($f) ?>' style="max-height: 20px" />
-							<?php } else { ?> <i class='material-icons'>rss_feed</i> <?php } ?>
-							<a href='#' onclick="CommonDialogs.editFeed(<?= $f ?>)">
-								<?= Feeds::_get_title($f, $this->host->get_owner_uid()) ?>
-							</a>
-							<?php if (isset($smart_added[(string)$f])) { ?>
-								<i class='material-icons text-info' style='font-size: 14px; vertical-align: middle'
-									title='<?= __('Auto-enabled by smart mode') ?>'>psychology</i>
-							<?php } ?>
-						</li>
-					<?php } ?>
-				</ul>
-			<?php } ?>
 		</div>
 		<?php
 	}
@@ -196,24 +125,16 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = clean($_POST["flaresolverr_url"] ?? "");
 		$max_timeout = (int)($_POST["max_timeout"] ?? 60000);
 		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
-		$mode = clean($_POST["mode"] ?? "per_feed");
-		$smart_expiry_hours = (int)($_POST["smart_expiry_hours"] ?? 720);
 
-		$prev_mode = $this->host->get($this, "mode", "per_feed");
 		$prev_enabled = $this->host->get($this, "enabled", "1");
 
 		$this->host->set($this, "enabled", $enabled);
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
 		$this->host->set($this, "max_concurrent", $max_concurrent);
-		$this->host->set($this, "mode", $mode);
-		$this->host->set($this, "smart_expiry_hours", $smart_expiry_hours);
 
 		if ($prev_enabled !== $enabled) {
 			Logger::log(E_USER_NOTICE, "fu_cloudflare: " . ($enabled === "1" ? "enabled" : "disabled"));
-		}
-		if ($prev_mode !== $mode) {
-			Logger::log(E_USER_NOTICE, "fu_cloudflare: mode changed to $mode");
 		}
 
 		echo __("Data saved.");
@@ -330,64 +251,6 @@ class Fu_Cloudflare extends Plugin {
 		echo json_encode(["success" => false, "error" => "FlareSolverr returned HTTP $http_code"]);
 	}
 
-	function clearSmartList() : void {
-		$smart_added = json_decode($this->host->get($this, "smart_added_feeds", "{}"), true) ?: [];
-		if (empty($smart_added)) {
-			echo json_encode(["success" => true, "message" => __("No smart-added feeds to purge.")]);
-			return;
-		}
-
-		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		$removed = 0;
-
-		foreach (array_keys($smart_added) as $feed_id) {
-			$key = array_search((int)$feed_id, $enabled_feeds);
-			if ($key !== false) {
-				unset($enabled_feeds[$key]);
-				$removed++;
-			}
-		}
-
-		$this->host->set($this, "enabled_feeds", array_values($enabled_feeds));
-		$this->host->set($this, "smart_added_feeds", "{}");
-
-		Logger::log(E_USER_NOTICE, "fu_cloudflare: purged $removed smart-added feed(s)");
-
-		echo json_encode([
-			"success" => true,
-			"message" => __("Removed $removed feed(s) from the smart list."),
-		]);
-	}
-
-	function hook_prefs_edit_feed($feed_id) {
-		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		?>
-		<header><?= __('Cloudflare Bypass') ?></header>
-		<section>
-			<fieldset>
-				<label class='checkbox'>
-					<?= \Controls\checkbox_tag("fu_cloudflare_enabled", in_array($feed_id, $enabled_feeds)) ?>
-					<?= __('Use FlareSolverr to fetch this feed') ?>
-				</label>
-			</fieldset>
-		</section>
-		<?php
-	}
-
-	function hook_prefs_save_feed($feed_id) {
-		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		$enable = checkbox_to_sql_bool($_POST["fu_cloudflare_enabled"] ?? "");
-		$key = array_search($feed_id, $enabled_feeds);
-
-		if ($enable) {
-			if ($key === false) array_push($enabled_feeds, $feed_id);
-		} else {
-			if ($key !== false) unset($enabled_feeds[$key]);
-		}
-
-		$this->host->set($this, "enabled_feeds", $enabled_feeds);
-	}
-
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
 		$enabled = $this->host->get($this, "enabled", "1");
 		if ($enabled !== "1") return $feed_data;
@@ -395,58 +258,12 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 		if (!$flaresolverr_url) return $feed_data;
 
-		$mode = $this->host->get($this, "mode", "per_feed");
-
-		if ($mode == "global") {
+		if ($this->is_cloudflare_blocked($feed_data)) {
 			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
-			return $result !== false ? $result : $feed_data;
-		}
-
-		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-
-		if ($mode == "smart") {
-			$smart_added = json_decode($this->host->get($this, "smart_added_feeds", "{}"), true) ?: [];
-			$smart_expiry_hours = (int)$this->host->get($this, "smart_expiry_hours", 720);
-			$feed_id = (string)$feed;
-
-			if (in_array($feed, $enabled_feeds)) {
-				if (isset($smart_added[$feed_id]) && $smart_expiry_hours > 0) {
-					$added_ts = $smart_added[$feed_id];
-					if (time() > $added_ts + ($smart_expiry_hours * 3600)) {
-						unset($smart_added[$feed_id]);
-						$key = array_search($feed, $enabled_feeds);
-						if ($key !== false) unset($enabled_feeds[$key]);
-						$this->host->set($this, "enabled_feeds", array_values($enabled_feeds));
-						$this->host->set($this, "smart_added_feeds", json_encode($smart_added));
-						Logger::log(E_USER_NOTICE, "fu_cloudflare: feed $feed expired, removed for retry", $fetch_url);
-						return $feed_data;
-					}
-				}
-
-				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
-				return $result !== false ? $result : $feed_data;
+			if ($result !== false) {
+				Logger::log(E_USER_NOTICE, "fu_cloudflare: bypassed Cloudflare for feed $feed", $fetch_url);
+				return $result;
 			}
-
-			if ($this->is_cloudflare_blocked($feed_data)) {
-				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
-				if ($result !== false) {
-					$smart_added[$feed_id] = time();
-					if (!in_array($feed, $enabled_feeds)) {
-						$enabled_feeds[] = $feed;
-					}
-					$this->host->set($this, "enabled_feeds", $enabled_feeds);
-					$this->host->set($this, "smart_added_feeds", json_encode($smart_added));
-					Logger::log(E_USER_NOTICE, "fu_cloudflare: Cloudflare blocked, auto-enabled feed $feed", $fetch_url);
-					return $result;
-				}
-			}
-
-			return $feed_data;
-		}
-
-		if (in_array($feed, $enabled_feeds)) {
-			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
-			return $result !== false ? $result : $feed_data;
 		}
 
 		return $feed_data;
@@ -572,18 +389,6 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		return false;
-	}
-
-	private function filter_unknown_feeds(array $enabled_feeds) : array {
-		$tmp = array();
-		foreach ($enabled_feeds as $feed) {
-			$sth = $this->pdo->prepare("SELECT id FROM ttrss_feeds WHERE id = ? AND owner_uid = ?");
-			$sth->execute([$feed, $_SESSION['uid']]);
-			if ($sth->fetch()) {
-				$tmp[] = $feed;
-			}
-		}
-		return $tmp;
 	}
 
 	function api_version() {
