@@ -107,6 +107,23 @@ class Fu_Cloudflare extends Plugin {
 		echo json_encode($ver);
 	}
 
+	private function load_feed_cookies($feed): array {
+		$mode = $this->host->get($this, "connection_mode", "persistent");
+		if ($mode !== 'cookies') return [[], ''];
+
+		$cookies_json = $this->host->get($this, "cookies_$feed", '');
+		$cookies = $cookies_json ? json_decode($cookies_json, true) : [];
+		$ua = $this->host->get($this, "ua_$feed", '');
+		return [$cookies, $ua];
+	}
+
+	private function store_feed_cookies($feed, array $result): void {
+		$mode = $this->host->get($this, "connection_mode", "persistent");
+		if ($mode !== 'cookies') return;
+		$this->host->set($this, "cookies_$feed", json_encode($result['cookies'] ?? []));
+		$this->host->set($this, "ua_$feed", $result['user_agent'] ?? '');
+	}
+
 	function get_js() {
 		return file_get_contents(__DIR__ . "/init.js");
 	}
@@ -122,6 +139,7 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
+		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
 		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
 		$stats = $this->get_stats();
 		?>
@@ -173,9 +191,24 @@ class Fu_Cloudflare extends Plugin {
 				</fieldset>
 
 				<fieldset>
+					<label><?= __('Connection mode:') ?></label>
+					<select dojoType='dijit.form.Select' name='connection_mode'>
+						<option value='persistent' <?= $connection_mode == 'persistent' ? 'selected="selected"' : '' ?>>
+							<?= __('Persistent session (keeps browser alive)') ?>
+						</option>
+						<option value='cookies' <?= $connection_mode == 'cookies' ? 'selected="selected"' : '' ?>>
+							<?= __('Cookie passthrough (carries cookies between fetches)') ?>
+						</option>
+						<option value='stateless' <?= $connection_mode == 'stateless' ? 'selected="selected"' : '' ?>>
+							<?= __('Stateless (fresh browser each request)') ?>
+						</option>
+					</select>
+				</fieldset>
+
+				<fieldset>
 					<label class='checkbox'>
 						<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
-						<?= __('Per-feed sessions (each feed gets its own browser context)') ?>
+						<?= __('Per-feed sessions (each feed gets its own browser context; persistent session only)') ?>
 					</label>
 				</fieldset>
 
@@ -198,14 +231,20 @@ class Fu_Cloudflare extends Plugin {
 			<hr/>
 
 			<h3><?= __('FlareSolverr Session') ?></h3>
-			<p class='text-muted'><?= __('A persistent browser session allows JavaScript PoW to complete across requests.') ?></p>
-			<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
-				<?= $this->host->get($this, "session_id", "") ? __('Active') : __('None') ?>
-			</span></p>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
-				<?= __('Reset Session') ?>
-			</button>
-			<div id='fu_session_result' style='margin-top: 8px'></div>
+			<?php if ($connection_mode === 'persistent'): ?>
+				<p class='text-muted'><?= __('A persistent browser session allows JavaScript PoW to complete across requests.') ?></p>
+				<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
+					<?= $this->host->get($this, "session_id", "") ? __('Active') : __('None') ?>
+				</span></p>
+				<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
+					<?= __('Reset Session') ?>
+				</button>
+				<div id='fu_session_result' style='margin-top: 8px'></div>
+			<?php elseif ($connection_mode === 'cookies'): ?>
+				<p class='text-muted'><?= __('Cookies from each successful fetch are stored and passed to the next request. No persistent browser session.') ?></p>
+			<?php else: ?>
+				<p class='text-muted'><?= __('Each request uses a fresh browser context. No state is preserved between fetches.') ?></p>
+			<?php endif; ?>
 
 			<hr/>
 
@@ -307,6 +346,7 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = clean($_POST["flaresolverr_url"] ?? "");
 		$max_timeout = (int)($_POST["max_timeout"] ?? 60000);
 		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
+		$connection_mode = clean($_POST["connection_mode"] ?? "persistent");
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 
 		$prev_enabled = $this->host->get($this, "enabled", "1");
@@ -315,6 +355,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
 		$this->host->set($this, "max_concurrent", $max_concurrent);
+		$this->host->set($this, "connection_mode", $connection_mode);
 		$this->host->set($this, "per_feed_sessions", $per_feed);
 
 		if ($prev_enabled !== $enabled) {
@@ -435,7 +476,7 @@ class Fu_Cloudflare extends Plugin {
 			"title" => $title,
 			"body_size" => strlen($result['data']),
 			"user_agent" => $result['user_agent'],
-			"cookies_count" => $result['cookies_count'],
+			"cookies_count" => count($result['cookies'] ?? []),
 		]);
 	}
 
@@ -487,62 +528,80 @@ class Fu_Cloudflare extends Plugin {
 			return $feed_data;
 		}
 
+		$mode = $this->host->get($this, "connection_mode", "persistent");
 		$session = $this->get_session($flaresolverr_url, $feed);
 		if ($session) {
 			Debug::log("fu_cloudflare: using session $session", Debug::LOG_VERBOSE);
 		}
 
-		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
-		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+		$cookies = [];
+		$ua = '';
+		if ($mode === 'cookies') {
+			list($cookies, $ua) = $this->load_feed_cookies($feed);
+			if ($cookies) {
+				Debug::log("fu_cloudflare: using " . count($cookies) . " stored cookies for feed $feed", Debug::LOG_VERBOSE);
+			}
+		}
 
-		if ($result !== false) {
-			if ($this->is_cloudflare_challenge($result)) {
+		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
+		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
+
+		if (!empty($result['success'])) {
+			if ($this->is_cloudflare_challenge($result['data'])) {
 				$backup_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 				$doubled = min($backup_timeout * 2, 300000);
 				$this->host->set($this, "max_timeout", $doubled);
-				Debug::log("fu_cloudflare: challenge present, retry with session after 3s (timeout: {$doubled}ms)...", Debug::LOG_VERBOSE);
+				Debug::log("fu_cloudflare: challenge present, retry after 3s (timeout: {$doubled}ms)...", Debug::LOG_VERBOSE);
 				sleep(3);
-				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 				$this->host->set($this, "max_timeout", $backup_timeout);
 
-				if ($result !== false && !$this->is_cloudflare_challenge($result)) {
+				if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
 					$this->increment_stat('stats_requests_ok');
-					Debug::log("fu_cloudflare: retry OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-					return $result;
+					Debug::log("fu_cloudflare: retry OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+					$this->store_feed_cookies($feed, $result);
+					return $result['data'];
 				}
 
-				Debug::log("fu_cloudflare: still challenge, trying fresh session...", Debug::LOG_VERBOSE);
-				$this->host->set($this, $this->get_session_key($feed), "");
-				$session = $this->get_session($flaresolverr_url, $feed);
-				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
+				if ($mode === 'persistent') {
+					Debug::log("fu_cloudflare: still challenge, trying fresh session...", Debug::LOG_VERBOSE);
+					$this->host->set($this, $this->get_session_key($feed), "");
+					$session = $this->get_session($flaresolverr_url, $feed);
+					$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 
-				if ($result !== false && !$this->is_cloudflare_challenge($result)) {
-					$this->increment_stat('stats_requests_ok');
-					Debug::log("fu_cloudflare: fresh session OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-					return $result;
+					if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
+						$this->increment_stat('stats_requests_ok');
+						Debug::log("fu_cloudflare: fresh session OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+						$this->store_feed_cookies($feed, $result);
+						return $result['data'];
+					}
 				}
 
 				$this->increment_stat('stats_requests_challenge');
 				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
 				Debug::log($msg, Debug::LOG_VERBOSE);
-				return $result;
+				return $result['data'];
 			}
 
 			$this->increment_stat('stats_requests_ok');
-			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-			return $result;
+			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+			$this->store_feed_cookies($feed, $result);
+			return $result['data'];
 		}
 
-		if (!empty($this->last_fetch_error['session_error'])) {
+		if ($mode === 'persistent' && !empty($this->last_fetch_error['session_error'])) {
 			Debug::log("fu_cloudflare: session expired, creating fresh session...", Debug::LOG_VERBOSE);
 			$this->host->set($this, $this->get_session_key($feed), "");
 			$session = $this->get_session($flaresolverr_url, $feed);
-			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session);
-			if ($result !== false) {
-				$label = $this->is_cloudflare_challenge($result) ? "challenge" : "OK";
-				Debug::log("fu_cloudflare: fresh session $label (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-				if (!$this->is_cloudflare_challenge($result)) $this->increment_stat('stats_requests_ok');
-				return $result;
+			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
+			if (!empty($result['success'])) {
+				$label = $this->is_cloudflare_challenge($result['data']) ? "challenge" : "OK";
+				Debug::log("fu_cloudflare: fresh session $label (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+				if (!$this->is_cloudflare_challenge($result['data'])) {
+					$this->increment_stat('stats_requests_ok');
+					$this->store_feed_cookies($feed, $result);
+				}
+				return $result['data'];
 			}
 		}
 
@@ -587,6 +646,9 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	private function get_session($flaresolverr_url, $feed = null) {
+		$mode = $this->host->get($this, "connection_mode", "persistent");
+		if ($mode !== 'persistent') return null;
+
 		$key = $this->get_session_key($feed);
 		$session = $this->host->get($this, $key, "");
 		if ($session) return $session;
@@ -614,14 +676,27 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function resetSession() : void {
-		if ($this->host->get($this, "per_feed_sessions", "0") === "1") {
+		$mode = $this->host->get($this, "connection_mode", "persistent");
+
+		if ($mode === 'persistent') {
+			if ($this->host->get($this, "per_feed_sessions", "0") === "1") {
+				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+				foreach ($enabled_feeds as $fid) {
+					$this->host->set($this, "session_id_$fid", "");
+				}
+			}
+			$this->host->set($this, "session_id", "");
+		}
+
+		if ($mode === 'cookies') {
 			$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
 			foreach ($enabled_feeds as $fid) {
-				$this->host->set($this, "session_id_$fid", "");
+				$this->host->set($this, "cookies_$fid", "");
+				$this->host->set($this, "ua_$fid", "");
 			}
 		}
-		$this->host->set($this, "session_id", "");
-		echo json_encode(["success" => true, "message" => __("Session(s) cleared. New sessions created on next feed fetch.")]);
+
+		echo json_encode(["success" => true, "message" => __("Session/cookies cleared.")]);
 	}
 
 	function scanFeeds() : void {
@@ -681,28 +756,28 @@ class Fu_Cloudflare extends Plugin {
 		echo json_encode(["success" => true, "feeds" => $results]);
 	}
 
-	private function fetch_with_rate_limit($url, $flaresolverr_url, $session = null) {
+	private function fetch_with_rate_limit($url, $flaresolverr_url, $session = null, $cookies = [], $ua = '') {
 		$this->last_fetch_error = null;
 		if ($this->acquire_flaresolverr_slot()) {
-			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session);
+			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 			$this->release_flaresolverr_slot();
 			if ($result['success']) {
-				if (!empty($result['user_agent']) || !empty($result['challenge_solved'])) {
+				if (!empty($result['user_agent']) || !empty($result['cookies'])) {
 					Debug::log(sprintf(
 						"fu_cloudflare: meta — solved=%s, ua=%s, cookies=%d",
 						!empty($result['challenge_solved']) ? 'true' : 'false',
 						$result['user_agent'] ?? '-',
-						$result['cookies_count'] ?? 0
+						count($result['cookies'] ?? [])
 					), Debug::LOG_VERBOSE);
 				}
-				return $result['data'];
+				return $result;
 			}
 			$this->last_fetch_error = $result;
 		} else {
 			$this->last_fetch_error = ['session_error' => false, 'error' => 'rate_limit'];
 			$this->increment_stat('stats_requests_ratelimited');
 		}
-		return false;
+		return ['success' => false];
 	}
 
 	private function acquire_flaresolverr_slot() {
@@ -747,7 +822,7 @@ class Fu_Cloudflare extends Plugin {
 		fclose($fp);
 	}
 
-	private function fetch_via_flaresolverr($url, $flaresolverr_url, $session = null) {
+	private function fetch_via_flaresolverr($url, $flaresolverr_url, $session = null, $cookies = [], $ua = '') {
 		$timeout = (int)$this->host->get($this, "max_timeout", 60000);
 
 		$body = [
@@ -756,6 +831,8 @@ class Fu_Cloudflare extends Plugin {
 			'maxTimeout' => $timeout,
 		];
 		if ($session) $body['session'] = $session;
+		if ($cookies) $body['cookies'] = $cookies;
+		if ($ua) $body['userAgent'] = $ua;
 
 		$ch = curl_init();
 		curl_setopt($ch, CURLOPT_URL, rtrim($flaresolverr_url, '/') . '/v1');
@@ -778,7 +855,7 @@ class Fu_Cloudflare extends Plugin {
 					'data' => $data['solution']['response'],
 					'challenge_solved' => !empty($data['solution']['challenge']),
 					'user_agent' => $data['solution']['userAgent'] ?? '',
-					'cookies_count' => count($data['solution']['cookies'] ?? []),
+					'cookies' => $data['solution']['cookies'] ?? [],
 				];
 			}
 			if (isset($data['error'])) {
