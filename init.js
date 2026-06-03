@@ -69,6 +69,53 @@ Plugins.Fu_Cloudflare = {
 		});
 	},
 
+	scanFeeds: function() {
+		Notify.progress('Scanning all feeds for Cloudflare challenges...', true);
+
+		xhr.post("backend.php", {
+			op: "PluginHandler",
+			plugin: "fu_cloudflare",
+			method: "scanFeeds"
+		}, function(reply) {
+			var div = document.getElementById("fu_scan_result");
+
+			try {
+				var result = JSON.parse(reply);
+
+				if (result.success && result.feeds) {
+					var html = "<table class='prefFeedList' style='width: auto'>" +
+						"<tr><th>Feed</th><th>HTTP</th><th>Challenge</th><th>Status</th></tr>";
+
+					for (var i = 0; i < result.feeds.length; i++) {
+						var f = result.feeds[i];
+						var challenge = f.is_cloudflare ?
+							"<span class='text-warning'>Yes</span>" :
+							"<span class='text-success'>No</span>";
+						var status = f.already_enabled ?
+							"<span class='text-success'>Enabled</span>" :
+							"<span class='text-muted'>-</span>";
+						html += "<tr>" +
+							"<td>" + f.title + "</td>" +
+							"<td>" + f.http_code + "</td>" +
+							"<td>" + challenge + "</td>" +
+							"<td>" + status + "</td>" +
+							"</tr>";
+					}
+
+					html += "</table>" +
+						"<p class='text-muted'>Scanned " + result.feeds.length + " feeds.</p>";
+					div.innerHTML = html;
+				} else {
+					div.innerHTML = "<div class='notice alert alert-warning'>" +
+						(result.error || "Scan failed.") +
+						"</div>";
+				}
+			} catch(e) {
+				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
+			}
+		});
+	},
+
 	testFlareSolverr: function() {
 		Notify.progress('Testing FlareSolverr...', true);
 
