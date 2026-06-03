@@ -20,6 +20,8 @@ class Fu_Cloudflare extends Plugin {
 
 		$host->add_hook($host::HOOK_FETCH_FEED, $this);
 		$host->add_hook($host::HOOK_PREFS_TAB, $this);
+		$host->add_hook($host::HOOK_PREFS_EDIT_FEED, $this);
+		$host->add_hook($host::HOOK_PREFS_SAVE_FEED, $this);
 	}
 
 	function get_js() {
@@ -251,6 +253,35 @@ class Fu_Cloudflare extends Plugin {
 		echo json_encode(["success" => false, "error" => "FlareSolverr returned HTTP $http_code"]);
 	}
 
+	function hook_prefs_edit_feed($feed_id) {
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		?>
+		<header><?= __('Cloudflare Bypass') ?></header>
+		<section>
+			<fieldset>
+				<label class='checkbox'>
+					<?= \Controls\checkbox_tag("fu_cloudflare_enabled", in_array($feed_id, $enabled_feeds)) ?>
+					<?= __('Fetch this feed via FlareSolverr (bypasses Cloudflare)') ?>
+				</label>
+			</fieldset>
+		</section>
+		<?php
+	}
+
+	function hook_prefs_save_feed($feed_id) {
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$enable = checkbox_to_sql_bool($_POST["fu_cloudflare_enabled"] ?? "");
+		$key = array_search($feed_id, $enabled_feeds);
+
+		if ($enable) {
+			if ($key === false) array_push($enabled_feeds, $feed_id);
+		} else {
+			if ($key !== false) unset($enabled_feeds[$key]);
+		}
+
+		$this->host->set($this, "enabled_feeds", $enabled_feeds);
+	}
+
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
 		$enabled = $this->host->get($this, "enabled", "1");
 		if ($enabled !== "1") return $feed_data;
@@ -258,12 +289,13 @@ class Fu_Cloudflare extends Plugin {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 		if (!$flaresolverr_url) return $feed_data;
 
-		if ($this->is_cloudflare_blocked($feed_data)) {
-			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
-			if ($result !== false) {
-				Logger::log(E_USER_NOTICE, "fu_cloudflare: bypassed Cloudflare for feed $feed", $fetch_url);
-				return $result;
-			}
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		if (!in_array($feed, $enabled_feeds)) return $feed_data;
+
+		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
+		if ($result !== false) {
+			Logger::log(E_USER_NOTICE, "fu_cloudflare: fetched feed $feed via FlareSolverr", $fetch_url);
+			return $result;
 		}
 
 		return $feed_data;
@@ -361,34 +393,6 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code"];
-	}
-
-	private function is_cloudflare_blocked($data) {
-		if (!$data || trim($data) === '') return false;
-
-		$dom = new DOMDocument();
-		if (@$dom->loadXML(mb_substr($data, 0, 5000))) {
-			return false;
-		}
-
-		$indicators = [
-			'Just a moment',
-			'Checking your browser',
-			'Attention Required',
-			'cf-browser-verification',
-			'challenge-platform',
-			'DDoS protection',
-			'Enable JavaScript',
-		];
-
-		$lower = mb_strtolower($data);
-		foreach ($indicators as $indicator) {
-			if (mb_strpos($lower, mb_strtolower($indicator)) !== false) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	function api_version() {
