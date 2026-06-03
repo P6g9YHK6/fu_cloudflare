@@ -135,7 +135,7 @@ class Fu_Cloudflare extends Plugin {
 	function hook_prefs_tab($args) {
 		if ($args != "prefFeeds") return;
 
-		$enabled = $this->host->get($this, "enabled", "1");
+		$mode = $this->host->get($this, "mode", "per_feed");
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
@@ -159,13 +159,19 @@ class Fu_Cloudflare extends Plugin {
 				</script>
 
 				<fieldset>
-					<label><?= __('Plugin:') ?></label>
-					<select dojoType='dijit.form.Select' name='enabled'>
-						<option value='1' <?= $enabled == '1' ? 'selected="selected"' : '' ?>>
-							<?= __('Enabled') ?>
+					<label><?= __('Mode:') ?></label>
+					<select dojoType='dijit.form.Select' name='mode'>
+						<option value='per_feed' <?= $mode == 'per_feed' ? 'selected="selected"' : '' ?>>
+							<?= __('Per-feed toggle') ?>
 						</option>
-						<option value='0' <?= $enabled == '0' ? 'selected="selected"' : '' ?>>
-							<?= __('Disabled (plugin does nothing)') ?>
+						<option value='auto' <?= $mode == 'auto' ? 'selected="selected"' : '' ?>>
+							<?= __('Auto-detect Cloudflare') ?>
+						</option>
+						<option value='all' <?= $mode == 'all' ? 'selected="selected"' : '' ?>>
+							<?= __('All feeds') ?>
+						</option>
+						<option value='disabled' <?= $mode == 'disabled' ? 'selected="selected"' : '' ?>>
+							<?= __('Disabled') ?>
 						</option>
 					</select>
 				</fieldset>
@@ -342,25 +348,19 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function save() : void {
-		$enabled = clean($_POST["enabled"] ?? "1");
+		$mode = clean($_POST["mode"] ?? "per_feed");
 		$flaresolverr_url = clean($_POST["flaresolverr_url"] ?? "");
 		$max_timeout = (int)($_POST["max_timeout"] ?? 60000);
 		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
 		$connection_mode = clean($_POST["connection_mode"] ?? "persistent");
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 
-		$prev_enabled = $this->host->get($this, "enabled", "1");
-
-		$this->host->set($this, "enabled", $enabled);
+		$this->host->set($this, "mode", $mode);
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
 		$this->host->set($this, "max_concurrent", $max_concurrent);
 		$this->host->set($this, "connection_mode", $connection_mode);
 		$this->host->set($this, "per_feed_sessions", $per_feed);
-
-		if ($prev_enabled !== $enabled) {
-			Logger::log(E_USER_NOTICE, "fu_cloudflare: " . ($enabled === "1" ? "enabled" : "disabled"));
-		}
 
 		echo __("Data saved.");
 	}
@@ -510,9 +510,10 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
-		$enabled = $this->host->get($this, "enabled", "1");
-		if ($enabled !== "1") {
-			Debug::log("fu_cloudflare: plugin disabled", Debug::LOG_VERBOSE);
+		$mode = $this->host->get($this, "mode", "per_feed");
+
+		if ($mode === "disabled") {
+			Debug::log("fu_cloudflare: disabled", Debug::LOG_VERBOSE);
 			return $feed_data;
 		}
 
@@ -523,12 +524,33 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		if (!in_array($feed, $enabled_feeds)) {
-			Debug::log("fu_cloudflare: feed $feed not in enabled list", Debug::LOG_VERBOSE);
-			return $feed_data;
+
+		if ($mode === "per_feed") {
+			if (!in_array($feed, $enabled_feeds)) {
+				Debug::log("fu_cloudflare: feed $feed not in enabled list", Debug::LOG_VERBOSE);
+				return $feed_data;
+			}
 		}
 
-		$mode = $this->host->get($this, "connection_mode", "persistent");
+		if ($mode === "auto") {
+			if (in_array($feed, $enabled_feeds)) {
+				Debug::log("fu_cloudflare: feed $feed manually enabled", Debug::LOG_VERBOSE);
+			} else {
+				$probe_body = $this->probe_cloudflare($fetch_url);
+				if ($probe_body === false) {
+					Debug::log("fu_cloudflare: probe failed for feed $feed, letting tt-rss handle it", Debug::LOG_VERBOSE);
+					return $feed_data;
+				}
+				if ($this->is_cloudflare_challenge($probe_body)) {
+					Debug::log("fu_cloudflare: probe detected Cloudflare on feed $feed", Debug::LOG_VERBOSE);
+				} else {
+					Debug::log("fu_cloudflare: probe clean for feed $feed, returning directly", Debug::LOG_VERBOSE);
+					return $probe_body;
+				}
+			}
+		}
+
+		$fs_mode = $this->host->get($this, "connection_mode", "stateless");
 		$session = $this->get_session($flaresolverr_url, $feed);
 		if ($session) {
 			Debug::log("fu_cloudflare: using session $session", Debug::LOG_VERBOSE);
@@ -536,7 +558,7 @@ class Fu_Cloudflare extends Plugin {
 
 		$cookies = [];
 		$ua = '';
-		if ($mode === 'cookies') {
+		if ($fs_mode === 'cookies') {
 			list($cookies, $ua) = $this->load_feed_cookies($feed);
 			if ($cookies) {
 				Debug::log("fu_cloudflare: using " . count($cookies) . " stored cookies for feed $feed", Debug::LOG_VERBOSE);
@@ -563,7 +585,7 @@ class Fu_Cloudflare extends Plugin {
 					return $result['data'];
 				}
 
-				if ($mode === 'persistent') {
+				if ($fs_mode === 'persistent') {
 					Debug::log("fu_cloudflare: still challenge, trying fresh session...", Debug::LOG_VERBOSE);
 					$this->host->set($this, $this->get_session_key($feed), "");
 					$session = $this->get_session($flaresolverr_url, $feed);
@@ -589,7 +611,7 @@ class Fu_Cloudflare extends Plugin {
 			return $result['data'];
 		}
 
-		if ($mode === 'persistent' && !empty($this->last_fetch_error['session_error'])) {
+		if ($fs_mode === 'persistent' && !empty($this->last_fetch_error['session_error'])) {
 			Debug::log("fu_cloudflare: session expired, creating fresh session...", Debug::LOG_VERBOSE);
 			$this->host->set($this, $this->get_session_key($feed), "");
 			$session = $this->get_session($flaresolverr_url, $feed);
@@ -608,6 +630,20 @@ class Fu_Cloudflare extends Plugin {
 		$this->increment_stat('stats_requests_failed');
 		Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed, returning original data", Debug::LOG_VERBOSE);
 		return $feed_data;
+	}
+
+	private function probe_cloudflare($url) {
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, $url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 5);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		curl_setopt($ch, CURLOPT_USERAGENT, 'Mozilla/5.0 (compatible; tt-rss)');
+		$body = curl_exec($ch);
+		$errno = curl_errno($ch);
+		curl_close($ch);
+		if ($errno) return false;
+		return $body;
 	}
 
 	private function is_cloudflare_challenge($data) {
