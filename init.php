@@ -289,24 +289,48 @@ class Fu_Cloudflare extends Plugin {
 		$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session);
 		$elapsed = round(microtime(true) - $start, 2);
 
-		if ($result['success']) {
-			$challenge = $this->is_cloudflare_challenge($result['data']);
-			echo json_encode([
-				"success" => true,
-				"time" => $elapsed,
-				"challenge_detected" => $challenge,
-				"body_size" => strlen($result['data']),
-				"status" => $challenge ? "Cloudflare challenge page returned" : "OK",
-				"user_agent" => $result['user_agent'],
-				"cookies_count" => $result['cookies_count'],
-			]);
-		} else {
+		if (!$result['success']) {
 			echo json_encode([
 				"success" => false,
 				"time" => $elapsed,
 				"error" => $result['error'],
 			]);
+			return;
 		}
+
+		if ($this->is_cloudflare_challenge($result['data'])) {
+			echo json_encode([
+				"success" => false,
+				"time" => $elapsed,
+				"error" => "Cloudflare challenge page returned — FlareSolverr could not solve it",
+				"body_size" => strlen($result['data']),
+			]);
+			return;
+		}
+
+		$title = '';
+		if (preg_match('/<title>(.*?)<\/title>/is', $result['data'], $m)) {
+			$title = trim(strip_tags($m[1]));
+		}
+
+		if (!$title) {
+			echo json_encode([
+				"success" => false,
+				"time" => $elapsed,
+				"error" => "No <title> tag found in response",
+				"body_size" => strlen($result['data']),
+			]);
+			return;
+		}
+
+		echo json_encode([
+			"success" => true,
+			"time" => $elapsed,
+			"title" => $title,
+			"body_size" => strlen($result['data']),
+			"user_agent" => $result['user_agent'],
+			"cookies_count" => $result['cookies_count'],
+		]);
 	}
 
 	function hook_prefs_edit_feed($feed_id) {
