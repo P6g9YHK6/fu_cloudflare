@@ -229,10 +229,13 @@ class Fu_Cloudflare extends Plugin {
 		$elapsed = round(microtime(true) - $start, 2);
 
 		if ($result['success']) {
-			$dom = new DOMDocument();
+			$data = $result['data'];
+			$size = strlen($data);
 			$feed_title = '';
 
-			if (@$dom->loadXML(mb_substr($result['data'], 0, 10000))) {
+			$dom = new DOMDocument();
+			libxml_use_internal_errors(true);
+			if ($dom->loadXML($data)) {
 				$xpath = new DOMXPath($dom);
 				$xpath->registerNamespace('atom', 'http://www.w3.org/2005/Atom');
 				$channel = $xpath->query('/rss/channel/title');
@@ -241,9 +244,20 @@ class Fu_Cloudflare extends Plugin {
 					$feed_title = $xpath->query('//atom:feed/atom:title')->length > 0
 						? trim($xpath->query('//atom:feed/atom:title')->item(0)->textContent) : '';
 				}
+			} else {
+				foreach (libxml_get_errors() as $err) {
+					Logger::log(E_USER_WARNING, "fu_cloudflare: XML parse error — line {$err->line}, col {$err->column}: {$err->message}", $test_url);
+				}
+				libxml_clear_errors();
 			}
 
-			$size = strlen($result['data']);
+			if (!$feed_title) {
+				if (preg_match('/<channel>.*?<title>(.*?)<\/title>/is', $data, $m)) {
+					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
+				} elseif (preg_match('/<feed.*?>.*?<title[^>]*>(.*?)<\/title>/is', $data, $m)) {
+					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
+				}
+			}
 
 			Logger::log(E_USER_NOTICE, "fu_cloudflare: connection test OK — {$elapsed}s, {$size}B", $test_url);
 
