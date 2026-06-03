@@ -50,11 +50,8 @@ Plugins.Fu_Cloudflare = {
 				var result = JSON.parse(reply);
 
 				if (result.success) {
-					var challengeInfo = result.challenge_detected ?
-						"<span class='text-warning'>Challenge detected!</span>" :
-						"<span class='text-success'>No challenge detected</span>";
 					div.innerHTML = "<div class='notice alert alert-info'>" +
-						"<strong>Result:</strong> " + challengeInfo + "<br/>" +
+						"<strong>Title:</strong> " + result.title + "<br/>" +
 						"<strong>Time:</strong> " + result.time + "s<br/>" +
 						"<strong>Response size:</strong> " + result.body_size + " bytes<br/>" +
 						(result.user_agent ? "<strong>User-Agent:</strong> " + result.user_agent + "<br/>" : "") +
