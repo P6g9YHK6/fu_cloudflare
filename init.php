@@ -142,6 +142,10 @@ class Fu_Cloudflare extends Plugin {
 
 			<h3><?= __('Test Connection') ?></h3>
 			<form dojoType='dijit.form.Form'>
+				<script type="dojo/method" event="onSubmit" args="evt">
+					evt.preventDefault();
+					Plugins.Fu_Cloudflare.testConnection();
+				</script>
 				<fieldset>
 					<label><?= __('Feed URL to test:') ?></label>
 					<input dojoType='dijit.form.TextBox' id='fu_test_url'
@@ -240,6 +244,14 @@ class Fu_Cloudflare extends Plugin {
 				if (!$feed_title) {
 					$feed_title = $xpath->query('//atom:feed/atom:title')->length > 0
 						? trim($xpath->query('//atom:feed/atom:title')->item(0)->textContent) : '';
+				}
+			}
+
+			if (!$feed_title) {
+				if (preg_match('/<channel>.*?<title>(.*?)<\/title>/is', $result['data'], $m)) {
+					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
+				} elseif (preg_match('/<feed.*?>.*?<title[^>]*>(.*?)<\/title>/is', $result['data'], $m)) {
+					$feed_title = trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
 				}
 			}
 
