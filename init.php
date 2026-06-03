@@ -92,6 +92,32 @@ class Fu_Cloudflare extends Plugin {
 
 			<hr/>
 
+			<h3><?= __('Enabled Feeds') ?></h3>
+			<?php
+				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+				if ($enabled_feeds) {
+					$feeds = ORM::for_table('ttrss_feeds')
+						->where_in('id', $enabled_feeds)
+						->order_by_asc('title')
+						->find_many();
+					if ($feeds) {
+						echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
+						foreach ($feeds as $f) {
+							$edit_url = \Controls\edit_feed_link($f->id);
+							echo "<li><a href='$edit_url'>" . htmlspecialchars($f->title) . "</a> <span class='text-muted'>(" . htmlspecialchars($f->feed_url) . ")</span></li>";
+						}
+						echo "</ul>";
+						echo "<p class='text-muted'>" . count($feeds) . " " . __('feed(s) with FlareSolverr enabled.') . "</p>";
+					} else {
+						echo "<p class='text-muted'>" . __('Feed IDs found but no matching feeds in database.') . "</p>";
+					}
+				} else {
+					echo "<p class='text-muted'>" . __('No feeds enabled yet. Open a feed\'s editor and check "Fetch this feed via FlareSolverr".') . "</p>";
+				}
+			?>
+
+			<hr/>
+
 			<h3><?= __('FlareSolverr Session') ?></h3>
 			<p class='text-muted'><?= __('FlareSolverr uses a browser session to solve multi-step challenges. A persistent session allows the JavaScript PoW to complete in the background.') ?></p>
 			<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
