@@ -25,6 +25,88 @@ class Fu_Cloudflare extends Plugin {
 		$host->add_hook($host::HOOK_PREFS_SAVE_FEED, $this);
 	}
 
+	private function get_git_commit(): string {
+		$git_dir = __DIR__ . '/.git';
+		if (!file_exists($git_dir)) return '';
+
+		$head_file = is_dir($git_dir) ? $git_dir . '/HEAD' : $git_dir;
+		$head = @file_get_contents($head_file);
+		if ($head === false) return '';
+
+		$head = trim($head);
+
+		if (str_starts_with($head, 'ref: ')) {
+			$ref_path = __DIR__ . '/.git/' . substr($head, 5);
+			$hash = @file_get_contents($ref_path);
+			return $hash ? substr(trim($hash), 0, 7) : '';
+		}
+
+		return substr($head, 0, 7);
+	}
+
+	private function get_git_branch(): string {
+		$git_dir = __DIR__ . '/.git';
+		if (!file_exists($git_dir)) return '';
+
+		$head_file = is_dir($git_dir) ? $git_dir . '/HEAD' : $git_dir;
+		$head = @file_get_contents($head_file);
+		if ($head === false) return '';
+
+		if (preg_match('#refs/heads/(.+)#', $head, $m)) {
+			return trim($m[1]);
+		}
+		return '';
+	}
+
+	private function check_version(): array {
+		$local = $this->get_git_commit();
+		if (!$local) return ['local' => '', 'latest' => '', 'up_to_date' => true];
+
+		$cache = $this->host->get($this, 'version_cache', '');
+		$time = (int)$this->host->get($this, 'version_cache_ts', 0);
+
+		if ($cache && (time() - $time) < 3600) {
+			$cached = json_decode($cache, true);
+			$cached['local'] = $local;
+			return $cached;
+		}
+
+		$branch = $this->get_git_branch();
+		if (!$branch) $branch = 'master';
+
+		$latest = '';
+		$ctx = stream_context_create(['http' => [
+			'timeout' => 5,
+			'user_agent' => 'fu_cloudflare',
+		]]);
+		$res = @file_get_contents("https://api.github.com/repos/P6g9YHK6/fu_cloudflare/commits/$branch", false, $ctx);
+		if ($res) {
+			$data = json_decode($res, true);
+			if (isset($data['sha'])) {
+				$latest = substr($data['sha'], 0, 7);
+			}
+		}
+
+		$result = [
+			'local' => $local,
+			'latest' => $latest,
+			'up_to_date' => $latest ? $local === $latest : true,
+		];
+
+		$this->host->set($this, 'version_cache', json_encode($result));
+		$this->host->set($this, 'version_cache_ts', (string)time());
+
+		return $result;
+	}
+
+	function resetVersionCheck(): void {
+		$this->host->set($this, 'version_cache', '');
+		$this->host->set($this, 'version_cache_ts', '0');
+		$ver = $this->check_version();
+		$ver['branch'] = $this->get_git_branch();
+		echo json_encode($ver);
+	}
+
 	function get_js() {
 		return file_get_contents(__DIR__ . "/init.js");
 	}
@@ -192,6 +274,30 @@ class Fu_Cloudflare extends Plugin {
 				<?= __('Scan All Feeds') ?>
 			</button>
 			<div id='fu_scan_result' style='margin-top: 8px'></div>
+
+			<hr/>
+			<div style='display: flex; justify-content: space-between; align-items: center; font-size: 0.85em'>
+				<span class='text-muted' id='fu_version_info'>
+					<?php
+						$commit = $this->get_git_commit();
+						$branch = $this->get_git_branch();
+						if ($commit) {
+							echo __('Version:') . " <code>$commit</code>";
+							if ($branch) echo " ($branch)";
+							echo ' ';
+							$ver = $this->check_version();
+							if ($ver['up_to_date']) {
+								echo "<span class='text-success'>✓ " . __('up to date') . "</span>";
+							} elseif ($ver['latest']) {
+								echo "<span class='text-warning'>⚠ " . __('New version available:') . " <code>{$ver['latest']}</code></span>";
+							}
+						} else {
+							echo __('Version:') . " <code>" . __('unknown') . "</code>";
+						}
+					?>
+				</span>
+				<span><a href='#' onclick='Plugins.Fu_Cloudflare.checkVersion(); return false;'><?= __('Check now') ?></a></span>
+			</div>
 		</div>
 		<?php
 	}
