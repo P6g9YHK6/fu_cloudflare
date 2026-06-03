@@ -18,7 +18,7 @@ class Fu_Cloudflare extends Plugin {
 	function init($host) {
 		$this->host = $host;
 
-		$host->add_hook($host::HOOK_FEED_FETCHED, $this);
+		$host->add_hook($host::HOOK_FETCH_FEED, $this);
 		$host->add_hook($host::HOOK_PREFS_TAB, $this);
 		$host->add_hook($host::HOOK_PREFS_EDIT_FEED, $this);
 		$host->add_hook($host::HOOK_PREFS_SAVE_FEED, $this);
@@ -282,7 +282,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "enabled_feeds", $enabled_feeds);
 	}
 
-	function hook_feed_fetched($feed_data, $fetch_url, $owner_uid, $feed) {
+	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
 		$enabled = $this->host->get($this, "enabled", "1");
 		if ($enabled !== "1") {
 			Debug::log("fu_cloudflare: plugin disabled", Debug::LOG_VERBOSE);
@@ -301,15 +301,16 @@ class Fu_Cloudflare extends Plugin {
 			return $feed_data;
 		}
 
-		if (!$this->is_cloudflare_challenge($feed_data)) {
-			Debug::log("fu_cloudflare: feed $feed is not a Cloudflare challenge, passing through", Debug::LOG_VERBOSE);
-			return $feed_data;
-		}
-
-		Debug::log("fu_cloudflare: Cloudflare challenge detected for feed $feed, fetching via FlareSolverr...", Debug::LOG_VERBOSE);
+		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url);
 		if ($result !== false) {
-			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+			if ($this->is_cloudflare_challenge($result)) {
+				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
+				Debug::log($msg, Debug::LOG_VERBOSE);
+				Logger::log(E_USER_WARNING, $msg, $fetch_url);
+			} else {
+				Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
+			}
 			return $result;
 		}
 
