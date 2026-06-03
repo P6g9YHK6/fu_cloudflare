@@ -11,13 +11,6 @@ Bypass Cloudflare protection for RSS feeds using FlareSolverr.
 - Per-feed toggle: enable only for specific feeds in the feed editor
 - FlareSolverr session management: persistent browser context for multi-step PoW challenges
 - Retry on challenge: detects if FlareSolverr returned a challenge page and retries with session
-- Feed debugger integration: logs at `LOG_VERBOSE` why the plugin did or didn't act on each feed
-- Test Feed Fetch: try any feed URL through FlareSolverr from the settings page to verify bypass works
-
-## Requirements
-
-- [FlareSolverr](https://github.com/FlareSolverr/FlareSolverr) running and accessible from your tt-rss server
-- PHP curl extension
 
 ## Installation
 
@@ -46,7 +39,7 @@ Configure the following in Preferences → Feeds → Plugins → Cloudflare Bypa
 
 ## Usage
 
-1. Right-click a feed → Edit → check "Fetch this feed via FlareSolverr (bypasses Cloudflare)".
+1. Right-click a feed → Edit → set FlareSolverr mode to "Always bypass via FlareSolverr".
 2. If FlareSolverr returns a challenge page, the plugin retries once after 3s using the persistent session. If it still fails, a warning is logged to the Event Log.
 
 ## Troubleshooting
@@ -55,16 +48,9 @@ If feeds are still failing:
 
 1. Check FlareSolverr is reachable via **Health Check** in plugin settings.
 2. Check the **Event Log** for `fu_cloudflare:` warning messages.
-3. Use the **feed debugger** at Verbose level (`?debug=1` in URL) to see `fu_cloudflare:` log lines.
-4. Click **Reset Session** to create a fresh browser context on FlareSolverr.
-5. Increase **Max timeout** if the PoW computation takes longer (try 120000ms).
-6. Check FlareSolverr logs: `docker logs flaresolverr`.
-7. Verify the feed has the checkbox enabled in its feed editor.
-
-## Limitations
-
-- FlareSolverr v3.x cannot detect or solve all Cloudflare challenge variants (e.g. hashcash SHA-256 PoW with `_hcc` cookie). The plugin detects these cases and logs a warning.
-- FlareSolverr sessions expire after inactivity. The plugin creates a new session automatically when needed.
+3. Click **Reset Session** to create a fresh browser context on FlareSolverr.
+4. Increase **Max timeout** if the PoW computation takes longer (try 120000ms).
+5. Check FlareSolverr logs: `docker logs flaresolverr`.
 
 ## Acknowledgments
 
