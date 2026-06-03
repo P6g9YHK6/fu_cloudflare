@@ -48,8 +48,9 @@ If feeds are still failing:
 
 1. Check FlareSolverr is reachable via **Health Check** in plugin settings.
 2. Check the **Event Log** for `fu_cloudflare:` warning messages.
-3. Click **Reset Session** to create a fresh browser context on FlareSolverr.
-4. Increase **Max timeout** if the PoW computation takes longer (try 120000ms).
+3. Use the **feed debugger** at Verbose level (`?debug=1` in URL) to see `fu_cloudflare:` log lines.
+4. Click **Reset Session** to create a fresh browser context on FlareSolverr.
+5. Increase **Max timeout** if the PoW computation takes longer (try 120000ms).
 5. Check FlareSolverr logs: `docker logs flaresolverr`.
 
 ## Acknowledgments
