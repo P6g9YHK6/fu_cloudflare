@@ -84,13 +84,16 @@ Plugins.Fu_Cloudflare = {
 
 				if (result.success && result.feeds) {
 					var html = "<table class='prefFeedList' style='width: auto'>" +
-						"<tr><th>Feed</th><th>HTTP</th><th>Challenge</th><th>Override</th></tr>";
+						"<tr><th>Feed</th><th>HTTP</th><th>Challenge</th><th>Challenged</th><th>Override</th></tr>";
 
 					for (var i = 0; i < result.feeds.length; i++) {
 						var f = result.feeds[i];
 						var challenge = f.is_cloudflare ?
 							"<span class='text-warning'>Yes</span>" :
 							"<span class='text-success'>No</span>";
+						var challenged = f.challenge_count > 0 ?
+							"<span class='text-warning'>" + f.challenge_count + "</span>" :
+							"<span class='text-muted'>0</span>";
 						var status;
 						if (f.excluded) {
 							status = "<span class='text-warning'>Excluded</span>";
@@ -103,6 +106,7 @@ Plugins.Fu_Cloudflare = {
 							"<td>" + f.title + "</td>" +
 							"<td>" + f.http_code + "</td>" +
 							"<td>" + challenge + "</td>" +
+							"<td>" + challenged + "</td>" +
 							"<td>" + status + "</td>" +
 							"</tr>";
 					}

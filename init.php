@@ -281,6 +281,7 @@ class Fu_Cloudflare extends Plugin {
 			<?php
 				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
 				$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+				$challenge_map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
 				$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
 				$all_feed_ids = array_map('intval', $all_feed_ids);
 
@@ -299,8 +300,11 @@ class Fu_Cloudflare extends Plugin {
 						} elseif (in_array($f['id'], $excluded_feeds)) {
 							$icon = ' <span class=\"text-warning\">[✗]</span>';
 						}
+						$cc = $challenge_map[(string)$f['id']] ?? 0;
+						$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
 						echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
 							$icon .
+							$challenge_tag .
 							" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 					}
 					echo "</ul>";
@@ -565,6 +569,7 @@ class Fu_Cloudflare extends Plugin {
 					return $feed_data;
 				}
 				if ($this->is_cloudflare_challenge($probe_body)) {
+					$this->increment_challenge_count($feed);
 					Debug::log("fu_cloudflare: probe detected Cloudflare on feed $feed", Debug::LOG_VERBOSE);
 				} else {
 					Debug::log("fu_cloudflare: probe clean for feed $feed, returning directly", Debug::LOG_VERBOSE);
@@ -623,6 +628,7 @@ class Fu_Cloudflare extends Plugin {
 				}
 
 				$this->increment_stat('stats_requests_challenge');
+				$this->increment_challenge_count($feed);
 				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
 				Debug::log($msg, Debug::LOG_VERBOSE);
 				return $result['data'];
@@ -681,6 +687,12 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, $key, $val + 1);
 	}
 
+	private function increment_challenge_count($feed) {
+		$map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
+		$map[(string)$feed] = ($map[(string)$feed] ?? 0) + 1;
+		$this->host->set($this, "challenges_per_feed", json_encode($map));
+	}
+
 	private function get_stats() {
 		return [
 			'requests_ok' => (int)$this->host->get($this, 'stats_requests_ok', 0),
@@ -694,6 +706,7 @@ class Fu_Cloudflare extends Plugin {
 		foreach (['stats_requests_ok', 'stats_requests_challenge', 'stats_requests_failed', 'stats_requests_ratelimited'] as $k) {
 			$this->host->set($this, $k, 0);
 		}
+		$this->host->set($this, "challenges_per_feed", "{}");
 		echo json_encode(["success" => true]);
 	}
 
@@ -770,6 +783,7 @@ class Fu_Cloudflare extends Plugin {
 
 		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
 		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+		$challenge_map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
 		$sth = $this->pdo->query("SELECT id, title, feed_url FROM ttrss_feeds ORDER BY title");
 
 		$multi = curl_multi_init();
@@ -790,6 +804,7 @@ class Fu_Cloudflare extends Plugin {
 				'title' => $row['title'],
 				'already_enabled' => in_array($row['id'], $enabled_feeds),
 				'excluded' => in_array($row['id'], $excluded_feeds),
+				'challenge_count' => $challenge_map[(string)$row['id']] ?? 0,
 			];
 		}
 
@@ -814,6 +829,7 @@ class Fu_Cloudflare extends Plugin {
 				'is_cloudflare' => $body ? $this->is_cloudflare_challenge($body) : false,
 				'already_enabled' => $info['already_enabled'],
 				'excluded' => $info['excluded'],
+				'challenge_count' => $info['challenge_count'],
 			];
 		}
 
