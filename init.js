@@ -55,10 +55,17 @@ Plugins.Fu_Cloudflare = {
 
 			try {
 				var result = JSON.parse(reply);
-				var html = "";
+				var borderColor = "#ddd";
+				var hasError = false;
+
+				if (!result.success) {
+					borderColor = "#d9534f";
+					hasError = true;
+				}
+
+				var html = "<div style='font-family: monospace; font-size: 11px; line-height: 1.6; background: #fafafa; border: 1px solid " + borderColor + "; border-radius: 4px; padding: 8px 10px; max-height: 350px; overflow-y: auto'>";
 
 				if (result.steps) {
-					html += "<div style='font-family: monospace; font-size: 11px; line-height: 1.6; background: #fafafa; border: 1px solid #ddd; border-radius: 4px; padding: 8px 10px; margin-bottom: 8px; max-height: 300px; overflow-y: auto'>";
 					for (var i = 0; i < result.steps.length; i++) {
 						var s = result.steps[i];
 						var color = "#333";
@@ -70,25 +77,25 @@ Plugins.Fu_Cloudflare = {
 							"<strong>◆ " + s.step + ":</strong> " + s.detail +
 							"</div>";
 					}
-					html += "</div>";
 				}
 
-				if (result.success) {
-					html += "<div class='notice alert alert-info' style='margin-top: 4px'>" +
-						"<strong>Title:</strong> " + (result.title || "(none)") + "<br/>" +
-						"<strong>Time:</strong> " + result.time + "s<br/>" +
-						"<strong>Response size:</strong> " + result.body_size + " bytes<br/>" +
-						(result.user_agent ? "<strong>User-Agent:</strong> " + result.user_agent + "<br/>" : "") +
-						(result.cookies_count !== undefined ? "<strong>Cookies:</strong> " + result.cookies_count + "<br/>" : "") +
-						(result.note ? "<strong>Note:</strong> " + result.note + "<br/>" : "") +
-						(result.warning ? "<strong>Warning:</strong> " + result.warning : "") +
-						"</div>";
-				} else {
-					html += "<div class='notice alert alert-warning' style='margin-top: 4px'>" +
-						"<strong>Error:</strong> " + result.error +
-						" (" + result.time + "s)" +
-						"</div>";
-				}
+				var summaryParts = [];
+				if (result.time !== undefined) summaryParts.push(result.time + "s");
+				if (result.body_size !== undefined) summaryParts.push(result.body_size + " bytes");
+				if (result.title) summaryParts.push('"' + result.title + '"');
+
+				html += "<div style='border-top: 1px solid #ddd; margin-top: 6px; padding-top: 6px; color: #555'>" +
+					"<strong>◇ Summary:</strong> " + summaryParts.join(", ");
+
+				if (result.user_agent) html += "<br/><strong>◇ User-Agent:</strong> " + result.user_agent;
+				if (result.cookies_count !== undefined) html += "<br/><strong>◇ Cookies:</strong> " + result.cookies_count;
+
+				if (result.error && hasError) html += "<br/><strong>◇ Error:</strong> " + result.error;
+
+				if (result.warning) html += "<br/><strong>◇ Warning:</strong> " + result.warning;
+				if (result.note) html += "<br/><strong>◇ Note:</strong> " + result.note;
+
+				html += "</div></div>";
 
 				div.innerHTML = html;
 			} catch(e) {
