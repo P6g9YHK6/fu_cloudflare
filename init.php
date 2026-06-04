@@ -373,6 +373,11 @@ class Fu_Cloudflare extends Plugin {
 		$connection_mode = clean($_POST["connection_mode"] ?? "persistent");
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 
+		if (!$flaresolverr_url || !filter_var($flaresolverr_url, FILTER_VALIDATE_URL)) {
+			echo __("Invalid FlareSolverr URL.");
+			return;
+		}
+
 		$this->host->set($this, "mode", $mode);
 		$this->host->set($this, "flaresolverr_url", $flaresolverr_url);
 		$this->host->set($this, "max_timeout", $max_timeout);
