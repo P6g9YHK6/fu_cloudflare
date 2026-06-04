@@ -73,8 +73,10 @@ Plugins.Fu_Cloudflare = {
 						else if (s.step === "Skipped") color = "#888";
 						else if (s.step === "Validation" && s.detail.indexOf("WARNING") !== -1) color = "#f0ad4e";
 						else if (s.step === "Fetch" && s.detail.indexOf("failed") !== -1) color = "#d9534f";
+						var label = "◆ " + s.step;
+						if (s.time !== undefined) label += " [" + s.time.toFixed(2) + "s]";
 						html += "<div style='color: " + color + "'>" +
-							"<strong>◆ " + s.step + ":</strong> " + s.detail +
+							"<strong>" + label + ":</strong> " + s.detail +
 							"</div>";
 					}
 				}

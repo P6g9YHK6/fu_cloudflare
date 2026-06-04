@@ -471,6 +471,7 @@ class Fu_Cloudflare extends Plugin {
 
 		$steps = [];
 		$start = microtime(true);
+		$t = fn() => round(microtime(true) - $start, 2);
 
 		$mode = $this->host->get($this, "mode", "per_feed");
 		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
@@ -480,48 +481,46 @@ class Fu_Cloudflare extends Plugin {
 
 		$steps[] = [
 			"step" => "Configuration",
-			"detail" => "mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry_on_failure=" . ($retry_on_failure === "1" ? "yes" : "no") . ", max_timeout=" . $max_timeout . "ms"
+			"detail" => "mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry_on_failure=" . ($retry_on_failure === "1" ? "yes" : "no") . ", max_timeout=" . $max_timeout . "ms",
+			"time" => $t(),
 		];
 
 		if (!$flaresolverr_url) {
-			$steps[] = ["step" => "Error", "detail" => "FlareSolverr URL is not configured."];
-			echo json_encode(["success" => false, "steps" => $steps, "time" => round(microtime(true) - $start, 2)]);
+			$steps[] = ["step" => "Error", "detail" => "FlareSolverr URL is not configured.", "time" => $t()];
+			echo json_encode(["success" => false, "steps" => $steps, "time" => $t()]);
 			return;
 		}
 
 		if ($mode === "disabled") {
-			$steps[] = ["step" => "Skipped", "detail" => "Plugin is disabled (mode=disabled). Feed not fetched via FlareSolverr."];
-			echo json_encode(["success" => true, "steps" => $steps, "time" => round(microtime(true) - $start, 2)]);
+			$steps[] = ["step" => "Skipped", "detail" => "Plugin is disabled (mode=disabled). Feed not fetched via FlareSolverr.", "time" => $t()];
+			echo json_encode(["success" => true, "steps" => $steps, "time" => $t()]);
 			return;
 		}
 
-		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
-
 		if ($mode === "per_feed") {
-			$steps[] = ["step" => "Feed", "detail" => "mode=per_feed: feed ID must be in enabled_feeds list. This test URL is always fetched regardless for diagnostics."];
+			$steps[] = ["step" => "Feed", "detail" => "mode=per_feed: feed ID must be in enabled_feeds list. This test URL is always fetched regardless for diagnostics.", "time" => $t()];
 		} elseif ($mode === "all") {
-			$steps[] = ["step" => "Feed", "detail" => "mode=all: all feeds routed through FlareSolverr."];
+			$steps[] = ["step" => "Feed", "detail" => "mode=all: all feeds routed through FlareSolverr.", "time" => $t()];
 		} elseif ($mode === "auto") {
-			$steps[] = ["step" => "Feed", "detail" => "mode=auto: probing URL for Cloudflare detection..."];
+			$steps[] = ["step" => "Feed", "detail" => "mode=auto: probing URL for Cloudflare detection...", "time" => $t()];
 			$probe_body = $this->probe_cloudflare($url);
 			if ($probe_body === false) {
-				$steps[] = ["step" => "Probe", "detail" => "Probe failed (network error or timeout). Would fall through to tt-rss direct fetch. Attempting FlareSolverr anyway for diagnostics."];
+				$steps[] = ["step" => "Probe", "detail" => "Probe failed (network error or timeout). Would fall through to tt-rss direct fetch. Attempting FlareSolverr anyway for diagnostics.", "time" => $t()];
 			} elseif ($this->is_cloudflare_challenge($probe_body)) {
-				$steps[] = ["step" => "Probe", "detail" => "Cloudflare challenge detected. Would route to FlareSolverr."];
+				$steps[] = ["step" => "Probe", "detail" => "Cloudflare challenge detected. Would route to FlareSolverr.", "time" => $t()];
 			} else {
 				$probe_title = '';
 				if (preg_match('/<title>(.*?)<\/title>/is', $probe_body, $m)) {
 					$probe_title = trim(strip_tags($m[1]));
 				}
-				$steps[] = ["step" => "Probe", "detail" => "No Cloudflare detected, probe returned " . strlen($probe_body) . " bytes" . ($probe_title ? " (title: \"$probe_title\")" : "") . ". Would return directly without FlareSolverr."];
+				$steps[] = ["step" => "Probe", "detail" => "No Cloudflare detected, probe returned " . strlen($probe_body) . " bytes" . ($probe_title ? " (title: \"$probe_title\")" : "") . ". Would return directly without FlareSolverr.", "time" => $t()];
 				echo json_encode([
 					"success" => true,
 					"steps" => $steps,
-					"time" => round(microtime(true) - $start, 2),
+					"time" => $t(),
 					"title" => $probe_title,
 					"body_size" => strlen($probe_body),
-					"note" => "Probe returned clean HTML — FlareSolverr not needed for this URL"
+					"note" => "Probe returned clean HTML — FlareSolverr not needed for this URL",
 				]);
 				return;
 			}
@@ -532,46 +531,64 @@ class Fu_Cloudflare extends Plugin {
 		$ua = '';
 
 		if ($connection_mode === "persistent") {
-			$steps[] = ["step" => "Session", "detail" => "connection_mode=persistent: creating session..."];
+			$steps[] = ["step" => "Session", "detail" => "connection_mode=persistent: creating session...", "time" => $t()];
 			$session = $this->get_session($flaresolverr_url);
 			if ($session) {
-				$steps[] = ["step" => "Session", "detail" => "Session $session" . ($retry_on_failure === "1" ? " (warmed up)" : "")];
+				$steps[] = ["step" => "Session", "detail" => "Session $session" . ($retry_on_failure === "1" ? " (warmed up)" : ""), "time" => $t()];
 			} else {
-				$steps[] = ["step" => "Session", "detail" => "Failed to create session. Proceeding without session."];
+				$steps[] = ["step" => "Session", "detail" => "Failed to create session. Proceeding without session.", "time" => $t()];
 			}
 		} elseif ($connection_mode === "cookies") {
-			$steps[] = ["step" => "Cookies", "detail" => "connection_mode=cookies: no session used. Cookies loaded per-feed in production (not available for test URL)."];
+			$steps[] = ["step" => "Cookies", "detail" => "connection_mode=cookies: no session used. Cookies loaded per-feed in production (not available for test URL).", "time" => $t()];
 		} else {
-			$steps[] = ["step" => "Stateless", "detail" => "connection_mode=stateless: fresh browser each request, no session."];
+			$steps[] = ["step" => "Stateless", "detail" => "connection_mode=stateless: fresh browser each request, no session.", "time" => $t()];
 		}
 
-		$steps[] = ["step" => "Fetch", "detail" => "Fetching URL via FlareSolverr with " . ($max_timeout / 1000) . "s timeout..."];
+		$steps[] = ["step" => "Fetch", "detail" => "Fetching URL via FlareSolverr with " . ($max_timeout / 1000) . "s timeout...", "time" => $t()];
 		$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 
 		if (!$result['success'] && $retry_on_failure === "1") {
-			$steps[] = ["step" => "Fetch", "detail" => "First attempt failed: {$result['error']}. Retrying after 2s..."];
+			$steps[] = ["step" => "Fetch", "detail" => "First attempt failed: {$result['error']}. Retrying after 2s...", "time" => $t()];
 			sleep(2);
 			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 		}
 
 		if (!$result['success']) {
-			$steps[] = ["step" => "Fetch", "detail" => "Fetch failed: {$result['error']}"];
+			$steps[] = ["step" => "Fetch", "detail" => "Fetch failed: {$result['error']}", "time" => $t()];
 			echo json_encode([
 				"success" => false,
 				"steps" => $steps,
-				"time" => round(microtime(true) - $start, 2),
+				"time" => $t(),
 				"error" => $result['error'],
 			]);
 			return;
 		}
 
-		$steps[] = ["step" => "Fetch", "detail" => "Response received (" . strlen($result['data']) . " bytes, " . ($result['challenge_solved'] ? "challenge solved" : "no challenge needed") . ")"];
-
 		$is_cf = $this->is_cloudflare_challenge($result['data']);
+		if ($is_cf && $retry_on_failure === "1") {
+			$steps[] = ["step" => "Fetch", "detail" => "Challenge detected, retrying after 3s...", "time" => $t()];
+			sleep(3);
+			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
+
+			if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
+				$is_cf = false;
+				$steps[] = ["step" => "Fetch", "detail" => "Retry succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
+			} elseif ($connection_mode === "persistent") {
+				$steps[] = ["step" => "Session", "detail" => "Still challenged, trying fresh session...", "time" => $t()];
+				$this->host->set($this, $this->get_session_key(), "");
+				$session = $this->get_session($flaresolverr_url);
+				$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
+				if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
+					$is_cf = false;
+					$steps[] = ["step" => "Fetch", "detail" => "Fresh session succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
+				}
+			}
+		}
+
 		if ($is_cf) {
-			$steps[] = ["step" => "Validation", "detail" => "WARNING: Response still contains Cloudflare challenge page. FlareSolverr could not solve the challenge."];
+			$steps[] = ["step" => "Validation", "detail" => "WARNING: Response still contains Cloudflare challenge page. FlareSolverr could not solve the challenge.", "time" => $t()];
 		} else {
-			$steps[] = ["step" => "Validation", "detail" => "No Cloudflare challenge detected in response."];
+			$steps[] = ["step" => "Validation", "detail" => "No Cloudflare challenge detected in response.", "time" => $t()];
 		}
 
 		$title = '';
@@ -580,15 +597,15 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		if (!$title) {
-			$steps[] = ["step" => "Result", "detail" => "No <title> tag found in response. Check if this is a valid feed URL."];
+			$steps[] = ["step" => "Result", "detail" => "No <title> tag found in response. Check if this is a valid feed URL.", "time" => $t()];
 		} else {
-			$steps[] = ["step" => "Result", "detail" => "Title: \"$title\", User-Agent: {$result['user_agent']}, Cookies: " . count($result['cookies'] ?? [])];
+			$steps[] = ["step" => "Result", "detail" => "Title: \"$title\", User-Agent: {$result['user_agent']}, Cookies: " . count($result['cookies'] ?? []), "time" => $t()];
 		}
 
 		echo json_encode([
 			"success" => !$is_cf && !!$title,
 			"steps" => $steps,
-			"time" => round(microtime(true) - $start, 2),
+			"time" => $t(),
 			"title" => $title,
 			"body_size" => strlen($result['data']),
 			"user_agent" => $result['user_agent'],
