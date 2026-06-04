@@ -145,6 +145,7 @@ class Fu_Cloudflare extends Plugin {
 		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
 		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
 		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
+		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1");
 		$stats = $this->get_stats();
 
 		$session_active = $this->host->get($this, "session_id", "");
@@ -239,6 +240,13 @@ class Fu_Cloudflare extends Plugin {
 							<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
 							<?= __('Per-feed sessions') ?>
 							<?= $this->help_icon('Each feed gets its own isolated browser context. Prevents cookie/session leakage between feeds. Persistent mode only. Adds RAM overhead.') ?>
+						</label>
+					</fieldset>
+					<fieldset style='margin-top: 4px'>
+						<label class='checkbox'>
+							<?= \Controls\checkbox_tag("retry_on_failure", $retry_on_failure === "1") ?>
+							<?= __('Retry on transient failure') ?>
+							<?= $this->help_icon('When enabled, creates a warmup request after session creation and retries once on any transient failure. Fixes first-request failures with cold browser sessions.') ?>
 						</label>
 					</fieldset>
 
@@ -382,6 +390,7 @@ class Fu_Cloudflare extends Plugin {
 		$max_concurrent = (int)($_POST["max_concurrent"] ?? 3);
 		$connection_mode = clean($_POST["connection_mode"] ?? "persistent");
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
+		$retry_on_failure = checkbox_to_sql_bool($_POST["retry_on_failure"] ?? "") ? "1" : "0";
 
 		if (!$flaresolverr_url || !filter_var($flaresolverr_url, FILTER_VALIDATE_URL)) {
 			echo json_encode(["success" => false, "error" => __("Invalid FlareSolverr URL.")]);
@@ -394,6 +403,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "max_concurrent", $max_concurrent);
 		$this->host->set($this, "connection_mode", $connection_mode);
 		$this->host->set($this, "per_feed_sessions", $per_feed);
+		$this->host->set($this, "retry_on_failure", $retry_on_failure);
 
 		echo json_encode(["success" => true, "message" => __("Data saved.")]);
 	}
@@ -626,6 +636,12 @@ class Fu_Cloudflare extends Plugin {
 		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 
+		if (empty($result['success']) && $this->host->get($this, "retry_on_failure", "1") === "1") {
+			Debug::log("fu_cloudflare: first attempt failed, retrying for feed $feed...", Debug::LOG_VERBOSE);
+			sleep(2);
+			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
+		}
+
 		if (!empty($result['success'])) {
 			if ($this->is_cloudflare_challenge($result['data'])) {
 				$backup_timeout = (int)$this->host->get($this, "max_timeout", 60000);
@@ -771,6 +787,22 @@ class Fu_Cloudflare extends Plugin {
 			if (isset($data['session'])) {
 				$this->host->set($this, $key, $data['session']);
 				Debug::log("fu_cloudflare: created session {$data['session']}", Debug::LOG_VERBOSE);
+
+				if ($this->host->get($this, "retry_on_failure", "1") === "1") {
+					$warmup = curl_init();
+					curl_setopt_array($warmup, [
+						CURLOPT_URL => rtrim($flaresolverr_url, '/') . '/v1',
+						CURLOPT_POST => 1,
+						CURLOPT_POSTFIELDS => json_encode(['cmd' => 'request.get', 'url' => 'about:blank', 'session' => $data['session'], 'maxTimeout' => 5000]),
+						CURLOPT_RETURNTRANSFER => true,
+						CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+						CURLOPT_TIMEOUT => 10,
+					]);
+					curl_exec($warmup);
+					curl_close($warmup);
+					Debug::log("fu_cloudflare: session warmed up", Debug::LOG_VERBOSE);
+				}
+
 				return $data['session'];
 			}
 		}
