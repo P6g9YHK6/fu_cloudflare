@@ -132,6 +132,10 @@ class Fu_Cloudflare extends Plugin {
 		return file_get_contents(__DIR__ . "/init.js");
 	}
 
+	private function help_icon($text) {
+		return "<span class='fu-help'><span class='fu-help-icon'>?</span><span class='fu-help-text'>" . htmlspecialchars($text) . "</span></span>";
+	}
+
 	function hook_prefs_tab($args) {
 		if ($args != "prefFeeds") return;
 
@@ -167,7 +171,7 @@ class Fu_Cloudflare extends Plugin {
 
 					<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px'>
 						<fieldset>
-							<label><?= __('Mode:') ?></label>
+							<label><?= __('Mode:') ?> <?= $this->help_icon('Controls which feeds go through FlareSolverr. per_feed: only included feeds. auto: quick probe then FS or bypass. all: every feed. disabled: off.') ?></label>
 							<select dojoType='dijit.form.Select' name='mode'>
 								<option value='per_feed' <?= $mode == 'per_feed' ? 'selected="selected"' : '' ?>>
 									<?= __('Per-feed toggle') ?>
@@ -185,7 +189,7 @@ class Fu_Cloudflare extends Plugin {
 						</fieldset>
 
 						<fieldset>
-							<label><?= __('Connection mode:') ?></label>
+							<label><?= __('Connection mode:') ?> <?= $this->help_icon('persistent: browser kept alive for JS challenges (100-200MB). cookies: carry cf_clearance between requests, no persistent browser. stateless: fresh browser each request, zero extra RAM.') ?></label>
 							<select dojoType='dijit.form.Select' name='connection_mode'>
 								<option value='persistent' <?= $connection_mode == 'persistent' ? 'selected="selected"' : '' ?>>
 									<?= __('Persistent session') ?>
@@ -200,13 +204,13 @@ class Fu_Cloudflare extends Plugin {
 						</fieldset>
 
 						<fieldset>
-							<label><?= __('Max timeout (ms):') ?></label>
+							<label><?= __('Max timeout (ms):') ?> <?= $this->help_icon('How long FlareSolverr waits for a page to load. Increase for slow PoW challenges. Default 60000, max 300000.') ?></label>
 							<input dojoType='dijit.form.NumberSpinner' name='max_timeout'
 								value='<?= $max_timeout ?>' smallDelta='5000' min='5000' max='300000'>
 						</fieldset>
 
 						<fieldset>
-							<label><?= __('Max concurrent:') ?></label>
+							<label><?= __('Max concurrent:') ?> <?= $this->help_icon('Parallel FlareSolverr requests. Each uses ~200-400MB RAM on the FS server. 0 = unlimited. Default 3.') ?></label>
 							<input dojoType='dijit.form.NumberSpinner' name='max_concurrent'
 								value='<?= $max_concurrent ?>' smallDelta='1' min='0' max='20'
 								title='<?= __('0 = unlimited') ?>'>
@@ -214,7 +218,7 @@ class Fu_Cloudflare extends Plugin {
 					</div>
 
 					<fieldset style='margin-top: 8px'>
-						<label><?= __('FlareSolverr URL:') ?></label>
+						<label><?= __('FlareSolverr URL:') ?> <?= $this->help_icon('Full URL including protocol and port. Default http://localhost:8191. Must be reachable from this server.') ?></label>
 						<input dojoType='dijit.form.TextBox' name='flaresolverr_url'
 							value='<?= htmlspecialchars($flaresolverr_url) ?>' style='width: 100%'
 							placeholder='http://localhost:8191'>
@@ -223,7 +227,8 @@ class Fu_Cloudflare extends Plugin {
 					<fieldset style='margin-top: 4px'>
 						<label class='checkbox'>
 							<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
-							<?= __('Per-feed sessions (each feed gets its own browser context; persistent session only)') ?>
+							<?= __('Per-feed sessions') ?>
+							<?= $this->help_icon('Each feed gets its own isolated browser context. Prevents cookie/session leakage between feeds. Persistent mode only. Adds RAM overhead.') ?>
 						</label>
 					</fieldset>
 
@@ -235,14 +240,14 @@ class Fu_Cloudflare extends Plugin {
 				<h3><?= __('FlareSolverr') ?></h3>
 				<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 16px'>
 					<div>
-						<h4><?= __('Health Check') ?></h4>
+						<h4><?= __('Health Check') ?> <?= $this->help_icon('Sends a request to FlareSolverr API to verify it is reachable. Shows version and response time.') ?></h4>
 						<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFlareSolverr()'>
 							<?= __('Test Connection') ?>
 						</button>
 						<div id='fu_flaresolverr_result' style='margin-top: 8px'></div>
 					</div>
 					<div>
-						<h4><?= __('Session') ?></h4>
+						<h4><?= __('Session') ?> <?= $this->help_icon('Persistent session status. Reset clears all sessions and creates a fresh one on the next fetch.') ?></h4>
 						<?php if ($connection_mode === 'persistent'): ?>
 							<p><strong><?= __('Status:') ?></strong> <span id='fu_session_status'><?= $session_active ? __('Active') : __('None') ?></span></p>
 							<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
@@ -257,7 +262,7 @@ class Fu_Cloudflare extends Plugin {
 					</div>
 				</div>
 				<hr style='margin: 12px 0'>
-				<h4><?= __('Test Feed Fetch') ?></h4>
+				<h4><?= __('Test Feed Fetch') ?> <?= $this->help_icon('Enter any feed URL to test if FlareSolverr can bypass Cloudflare for it. Shows HTTP code, challenge status, and response body.') ?></h4>
 				<div style='display: flex; gap: 8px; align-items: center; flex-wrap: wrap'>
 					<input dojoType='dijit.form.TextBox' id='fu_test_url'
 						value='https://sarahcandersen.com/rss' style='width: 400px'
@@ -272,23 +277,23 @@ class Fu_Cloudflare extends Plugin {
 			<div class='fu-card'>
 				<h3><?= __('Feeds & Statistics') ?></h3>
 				<div style='display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 12px'>
-					<span><strong><?= __('OK:') ?></strong> <?= $stats['requests_ok'] ?></span>
-					<span><strong><?= __('Challenges:') ?></strong> <span class='text-warning'><?= $stats['requests_challenge'] ?></span></span>
-					<span><strong><?= __('Errors:') ?></strong> <span class='text-error'><?= $stats['requests_failed'] ?></span></span>
-					<span><strong><?= __('Ratelimited:') ?></strong> <?= $stats['requests_ratelimited'] ?></span>
+					<span><strong><?= __('OK:') ?></strong> <?= $stats['requests_ok'] ?> <?= $this->help_icon('Successful fetches since last reset.') ?></span>
+					<span><strong><?= __('Challenges:') ?></strong> <span class='text-warning'><?= $stats['requests_challenge'] ?></span> <?= $this->help_icon('FlareSolverr returned a challenge page — it could not solve the challenge.') ?></span>
+					<span><strong><?= __('Errors:') ?></strong> <span class='text-error'><?= $stats['requests_failed'] ?></span> <?= $this->help_icon('Network or server errors during fetch.') ?></span>
+					<span><strong><?= __('Ratelimited:') ?></strong> <?= $stats['requests_ratelimited'] ?> <?= $this->help_icon('Requests skipped due to rate limiter.') ?></span>
 					<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetStats()'>
 						<?= __('Reset') ?>
 					</button>
 				</div>
 
-				<h4><?= __('Scan All Feeds') ?></h4>
+				<h4><?= __('Scan All Feeds') ?> <?= $this->help_icon('Checks every feed in the database for Cloudflare via a quick HTTP request. Shows HTTP code, challenge detection, historical challenge count, and override status.') ?></h4>
 				<p class='text-muted'><?= __('Check all feeds for Cloudflare challenges. Feeds returning a challenge can then be enabled in their feed editor.') ?></p>
 				<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.scanFeeds()'>
 					<?= __('Scan Now') ?>
 				</button>
 				<div id='fu_scan_result' style='margin-top: 8px'></div>
 
-				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?></h4>
+				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?> <?= $this->help_icon('Feeds with a per-feed override. [✓] = bypass via FlareSolverr, [✗] = excluded from FlareSolverr. Number = challenge count since last reset.') ?></h4>
 				<?php
 					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
 					$all_feed_ids = array_map('intval', $all_feed_ids);
@@ -352,6 +357,10 @@ class Fu_Cloudflare extends Plugin {
 			.fu-card h3 { margin: 0 0 12px 0; font-size: 1.1em; }
 			.fu-card h4 { margin: 0 0 6px 0; font-size: 0.95em; }
 			.fu-card fieldset { margin: 0; }
+			.fu-help { position: relative; cursor: help; }
+			.fu-help-icon { display: inline-flex; width: 15px; height: 15px; border-radius: 50%; background: rgba(128,128,128,0.4); color: inherit; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; margin-left: 4px; vertical-align: middle; }
+			.fu-help-text { display: none; position: absolute; left: 0; top: 22px; z-index: 1000; background: #333; color: #fff; padding: 10px 14px; border-radius: 6px; font-size: 12px; white-space: normal; width: 320px; line-height: 1.5; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
+			.fu-help:hover .fu-help-text { display: block; }
 		</style>
 		<?php
 	}
