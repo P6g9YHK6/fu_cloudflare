@@ -754,7 +754,9 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function resetSession() : void {
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 		$mode = $this->host->get($this, "connection_mode", "persistent");
+		$session = null;
 
 		if ($mode === 'persistent') {
 			if ($this->host->get($this, "per_feed_sessions", "0") === "1") {
@@ -764,6 +766,10 @@ class Fu_Cloudflare extends Plugin {
 				}
 			}
 			$this->host->set($this, "session_id", "");
+
+			if ($flaresolverr_url) {
+				$session = $this->get_session($flaresolverr_url);
+			}
 		}
 
 		if ($mode === 'cookies') {
@@ -777,7 +783,11 @@ class Fu_Cloudflare extends Plugin {
 			}
 		}
 
-		echo json_encode(["success" => true, "message" => __("Session/cookies cleared.")]);
+		echo json_encode([
+			"success" => true,
+			"session" => $session,
+			"message" => __("Session/cookies cleared."),
+		]);
 	}
 
 	function scanFeeds() : void {

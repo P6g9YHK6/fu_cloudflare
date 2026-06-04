@@ -13,10 +13,14 @@ Plugins.Fu_Cloudflare = {
 			try {
 				var result = JSON.parse(reply);
 
+				Notify.close();
+
 				if (result.success) {
-					document.getElementById("fu_session_status").innerText = "Active";
+					document.getElementById("fu_session_status").innerText = result.session ? "Active" : "None";
 					div.innerHTML = "<div class='notice alert alert-info'>" +
-						"<strong>Session created:</strong> " + result.session +
+						(result.session
+							? "<strong>Session created:</strong> " + result.session
+							: "<strong>" + result.message + "</strong>") +
 						"</div>";
 				} else {
 					div.innerHTML = "<div class='notice alert alert-warning'>" +
