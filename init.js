@@ -55,21 +55,42 @@ Plugins.Fu_Cloudflare = {
 
 			try {
 				var result = JSON.parse(reply);
+				var html = "";
+
+				if (result.steps) {
+					html += "<div style='font-family: monospace; font-size: 11px; line-height: 1.6; background: #fafafa; border: 1px solid #ddd; border-radius: 4px; padding: 8px 10px; margin-bottom: 8px; max-height: 300px; overflow-y: auto'>";
+					for (var i = 0; i < result.steps.length; i++) {
+						var s = result.steps[i];
+						var color = "#333";
+						if (s.step === "Error") color = "#d9534f";
+						else if (s.step === "Skipped") color = "#888";
+						else if (s.step === "Validation" && s.detail.indexOf("WARNING") !== -1) color = "#f0ad4e";
+						else if (s.step === "Fetch" && s.detail.indexOf("failed") !== -1) color = "#d9534f";
+						html += "<div style='color: " + color + "'>" +
+							"<strong>◆ " + s.step + ":</strong> " + s.detail +
+							"</div>";
+					}
+					html += "</div>";
+				}
 
 				if (result.success) {
-					div.innerHTML = "<div class='notice alert alert-info'>" +
-						"<strong>Title:</strong> " + result.title + "<br/>" +
+					html += "<div class='notice alert alert-info' style='margin-top: 4px'>" +
+						"<strong>Title:</strong> " + (result.title || "(none)") + "<br/>" +
 						"<strong>Time:</strong> " + result.time + "s<br/>" +
 						"<strong>Response size:</strong> " + result.body_size + " bytes<br/>" +
 						(result.user_agent ? "<strong>User-Agent:</strong> " + result.user_agent + "<br/>" : "") +
-						(result.cookies_count !== undefined ? "<strong>Cookies:</strong> " + result.cookies_count : "") +
+						(result.cookies_count !== undefined ? "<strong>Cookies:</strong> " + result.cookies_count + "<br/>" : "") +
+						(result.note ? "<strong>Note:</strong> " + result.note + "<br/>" : "") +
+						(result.warning ? "<strong>Warning:</strong> " + result.warning : "") +
 						"</div>";
 				} else {
-					div.innerHTML = "<div class='notice alert alert-warning'>" +
+					html += "<div class='notice alert alert-warning' style='margin-top: 4px'>" +
 						"<strong>Error:</strong> " + result.error +
 						" (" + result.time + "s)" +
 						"</div>";
 				}
+
+				div.innerHTML = html;
 			} catch(e) {
 				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
 			}
