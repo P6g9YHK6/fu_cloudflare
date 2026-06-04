@@ -348,7 +348,7 @@ class Fu_Cloudflare extends Plugin {
 		</div>
 
 		<style>
-			.fu-card { border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin-bottom: 16px; background: #fafafa; }
+			.fu-card { border: 1px solid var(--fg-color); border-radius: 6px; padding: 16px; margin-bottom: 16px; opacity: 0.85; }
 			.fu-card h3 { margin: 0 0 12px 0; font-size: 1.1em; }
 			.fu-card h4 { margin: 0 0 6px 0; font-size: 0.95em; }
 			.fu-card fieldset { margin: 0; }
