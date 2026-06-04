@@ -142,189 +142,188 @@ class Fu_Cloudflare extends Plugin {
 		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
 		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
 		$stats = $this->get_stats();
+
+		$session_active = $this->host->get($this, "session_id", "");
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+		$challenge_map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
 		?>
 		<div dojoType='dijit.layout.AccordionPane'
 			title="<i class='material-icons'>flash_on</i> <?= __('Cloudflare Bypass (fu_cloudflare)') ?>">
 
-			<form dojoType='dijit.form.Form'>
-				<?= \Controls\pluginhandler_tags($this, "save") ?>
-				<script type="dojo/method" event="onSubmit" args="evt">
-					evt.preventDefault();
-					if (this.validate()) {
-						Notify.progress('Saving data...', true);
-						xhr.post("backend.php", this.getValues(), (reply) => {
-							Notify.info(reply);
-						});
-					}
-				</script>
-
-				<fieldset>
-					<label><?= __('Mode:') ?></label>
-					<select dojoType='dijit.form.Select' name='mode'>
-						<option value='per_feed' <?= $mode == 'per_feed' ? 'selected="selected"' : '' ?>>
-							<?= __('Per-feed toggle') ?>
-						</option>
-						<option value='auto' <?= $mode == 'auto' ? 'selected="selected"' : '' ?>>
-							<?= __('Auto-detect Cloudflare') ?>
-						</option>
-						<option value='all' <?= $mode == 'all' ? 'selected="selected"' : '' ?>>
-							<?= __('All feeds') ?>
-						</option>
-						<option value='disabled' <?= $mode == 'disabled' ? 'selected="selected"' : '' ?>>
-							<?= __('Disabled') ?>
-						</option>
-					</select>
-				</fieldset>
-
-				<fieldset>
-					<label><?= __('FlareSolverr URL:') ?></label>
-					<input dojoType='dijit.form.TextBox' name='flaresolverr_url'
-						value='<?= htmlspecialchars($flaresolverr_url) ?>' style='width: 400px'
-						placeholder='http://localhost:8191'>
-				</fieldset>
-
-				<fieldset>
-					<label><?= __('Max timeout (ms):') ?></label>
-					<input dojoType='dijit.form.NumberSpinner' name='max_timeout'
-						value='<?= $max_timeout ?>' smallDelta='5000' min='5000' max='300000'>
-				</fieldset>
-
-				<fieldset>
-					<label><?= __('Max concurrent requests:') ?></label>
-					<input dojoType='dijit.form.NumberSpinner' name='max_concurrent'
-						value='<?= $max_concurrent ?>' smallDelta='1' min='0' max='20'
-						title='<?= __('0 = unlimited') ?>'>
-				</fieldset>
-
-				<fieldset>
-					<label><?= __('Connection mode:') ?></label>
-					<select dojoType='dijit.form.Select' name='connection_mode'>
-						<option value='persistent' <?= $connection_mode == 'persistent' ? 'selected="selected"' : '' ?>>
-							<?= __('Persistent session (keeps browser alive)') ?>
-						</option>
-						<option value='cookies' <?= $connection_mode == 'cookies' ? 'selected="selected"' : '' ?>>
-							<?= __('Cookie passthrough (carries cookies between fetches)') ?>
-						</option>
-						<option value='stateless' <?= $connection_mode == 'stateless' ? 'selected="selected"' : '' ?>>
-							<?= __('Stateless (fresh browser each request)') ?>
-						</option>
-					</select>
-				</fieldset>
-
-				<fieldset>
-					<label class='checkbox'>
-						<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
-						<?= __('Per-feed sessions (each feed gets its own browser context; persistent session only)') ?>
-					</label>
-				</fieldset>
-
-				<?= \Controls\submit_tag(__("Save")) ?>
-			</form>
-
-			<hr/>
-
-			<h3><?= __('Statistics') ?></h3>
-			<table class='prefFeedList' style='width: auto'>
-				<tr><td><?= __('Successful fetches:') ?></td><td><strong><?= $stats['requests_ok'] ?></strong></td></tr>
-				<tr><td><?= __('Challenge pages returned:') ?></td><td><strong><?= $stats['requests_challenge'] ?></strong></td></tr>
-				<tr><td><?= __('Errors:') ?></td><td><strong><?= $stats['requests_failed'] ?></strong></td></tr>
-				<tr><td><?= __('Rate-limited:') ?></td><td><strong><?= $stats['requests_ratelimited'] ?></strong></td></tr>
-			</table>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetStats()'>
-				<?= __('Reset Statistics') ?>
-			</button>
-
-			<hr/>
-
-			<h3><?= __('FlareSolverr Session') ?></h3>
-			<?php if ($connection_mode === 'persistent'): ?>
-				<p class='text-muted'><?= __('A persistent browser session allows JavaScript PoW to complete across requests.') ?></p>
-				<p><strong><?= __('Session:') ?></strong> <span id='fu_session_status'>
-					<?= $this->host->get($this, "session_id", "") ? __('Active') : __('None') ?>
-				</span></p>
-				<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
-					<?= __('Reset Session') ?>
-				</button>
-				<div id='fu_session_result' style='margin-top: 8px'></div>
-			<?php elseif ($connection_mode === 'cookies'): ?>
-				<p class='text-muted'><?= __('Cookies from each successful fetch are stored and passed to the next request. No persistent browser session.') ?></p>
-			<?php else: ?>
-				<p class='text-muted'><?= __('Each request uses a fresh browser context. No state is preserved between fetches.') ?></p>
-			<?php endif; ?>
-
-			<hr/>
-
-			<h3><?= __('FlareSolverr Health Check') ?></h3>
-			<p class='text-muted'><?= __('Verify that FlareSolverr is reachable and responding.') ?></p>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFlareSolverr()'>
-				<?= __('Test FlareSolverr') ?>
-			</button>
-			<div id='fu_flaresolverr_result' style='margin-top: 8px'></div>
-
-			<hr/>
-
-			<h3><?= __('Test Feed Fetch') ?></h3>
-			<p class='text-muted'><?= __('Fetch a feed URL through FlareSolverr to test if it can bypass Cloudflare.') ?></p>
-			<div style='margin-bottom: 8px'>
-				<input dojoType='dijit.form.TextBox' id='fu_test_url'
-					value='https://sarahcandersen.com/rss' style='width: 400px'
-					placeholder='https://sarahcandersen.com/rss'>
-			</div>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFetchFeed()'>
-				<?= __('Test Fetch') ?>
-			</button>
-			<div id='fu_test_result' style='margin-top: 8px'></div>
-
-			<hr/>
-
-			<h3><?= __('Feeds') ?></h3>
-			<?php
-				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
-				$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
-				$challenge_map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
-				$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
-				$all_feed_ids = array_map('intval', $all_feed_ids);
-
-				if ($all_feed_ids) {
-					$placeholders = implode(',', array_fill(0, count($all_feed_ids), '?'));
-					$sth = $this->pdo->prepare(
-						"SELECT id, title, feed_url FROM ttrss_feeds WHERE id IN ($placeholders) ORDER BY title"
-					);
-					$sth->execute($all_feed_ids);
-
-					echo "<ul class='panel panel-scrollable' style='max-height: 300px; overflow-y: auto'>";
-					foreach ($sth as $f) {
-						$icon = '';
-						if (in_array($f['id'], $enabled_feeds)) {
-							$icon = ' <span class=\"text-success\">[✓]</span>';
-						} elseif (in_array($f['id'], $excluded_feeds)) {
-							$icon = ' <span class=\"text-warning\">[✗]</span>';
+			<div class='fu-card'>
+				<h3><?= __('Plugin Configuration') ?></h3>
+				<form dojoType='dijit.form.Form'>
+					<?= \Controls\pluginhandler_tags($this, "save") ?>
+					<script type="dojo/method" event="onSubmit" args="evt">
+						evt.preventDefault();
+						if (this.validate()) {
+							Notify.progress('Saving data...', true);
+							xhr.post("backend.php", this.getValues(), (reply) => {
+								Notify.info(reply);
+							});
 						}
-						$cc = $challenge_map[(string)$f['id']] ?? 0;
-						$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
-						echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
-							$icon .
-							$challenge_tag .
-							" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
+					</script>
+
+					<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 8px'>
+						<fieldset>
+							<label><?= __('Mode:') ?></label>
+							<select dojoType='dijit.form.Select' name='mode'>
+								<option value='per_feed' <?= $mode == 'per_feed' ? 'selected="selected"' : '' ?>>
+									<?= __('Per-feed toggle') ?>
+								</option>
+								<option value='auto' <?= $mode == 'auto' ? 'selected="selected"' : '' ?>>
+									<?= __('Auto-detect Cloudflare') ?>
+								</option>
+								<option value='all' <?= $mode == 'all' ? 'selected="selected"' : '' ?>>
+									<?= __('All feeds') ?>
+								</option>
+								<option value='disabled' <?= $mode == 'disabled' ? 'selected="selected"' : '' ?>>
+									<?= __('Disabled') ?>
+								</option>
+							</select>
+						</fieldset>
+
+						<fieldset>
+							<label><?= __('Connection mode:') ?></label>
+							<select dojoType='dijit.form.Select' name='connection_mode'>
+								<option value='persistent' <?= $connection_mode == 'persistent' ? 'selected="selected"' : '' ?>>
+									<?= __('Persistent session') ?>
+								</option>
+								<option value='cookies' <?= $connection_mode == 'cookies' ? 'selected="selected"' : '' ?>>
+									<?= __('Cookie passthrough') ?>
+								</option>
+								<option value='stateless' <?= $connection_mode == 'stateless' ? 'selected="selected"' : '' ?>>
+									<?= __('Stateless') ?>
+								</option>
+							</select>
+						</fieldset>
+
+						<fieldset>
+							<label><?= __('Max timeout (ms):') ?></label>
+							<input dojoType='dijit.form.NumberSpinner' name='max_timeout'
+								value='<?= $max_timeout ?>' smallDelta='5000' min='5000' max='300000'>
+						</fieldset>
+
+						<fieldset>
+							<label><?= __('Max concurrent:') ?></label>
+							<input dojoType='dijit.form.NumberSpinner' name='max_concurrent'
+								value='<?= $max_concurrent ?>' smallDelta='1' min='0' max='20'
+								title='<?= __('0 = unlimited') ?>'>
+						</fieldset>
+					</div>
+
+					<fieldset style='margin-top: 8px'>
+						<label><?= __('FlareSolverr URL:') ?></label>
+						<input dojoType='dijit.form.TextBox' name='flaresolverr_url'
+							value='<?= htmlspecialchars($flaresolverr_url) ?>' style='width: 100%'
+							placeholder='http://localhost:8191'>
+					</fieldset>
+
+					<fieldset style='margin-top: 4px'>
+						<label class='checkbox'>
+							<?= \Controls\checkbox_tag("per_feed_sessions", $per_feed === "1") ?>
+							<?= __('Per-feed sessions (each feed gets its own browser context; persistent session only)') ?>
+						</label>
+					</fieldset>
+
+					<div style='margin-top: 8px'><?= \Controls\submit_tag(__("Save Configuration")) ?></div>
+				</form>
+			</div>
+
+			<div class='fu-card'>
+				<h3><?= __('FlareSolverr') ?></h3>
+				<div style='display: grid; grid-template-columns: 1fr 1fr; gap: 16px'>
+					<div>
+						<h4><?= __('Health Check') ?></h4>
+						<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFlareSolverr()'>
+							<?= __('Test Connection') ?>
+						</button>
+						<div id='fu_flaresolverr_result' style='margin-top: 8px'></div>
+					</div>
+					<div>
+						<h4><?= __('Session') ?></h4>
+						<?php if ($connection_mode === 'persistent'): ?>
+							<p><strong><?= __('Status:') ?></strong> <span id='fu_session_status'><?= $session_active ? __('Active') : __('None') ?></span></p>
+							<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetFlareSolverrSession()'>
+								<?= __('Reset Session') ?>
+							</button>
+							<div id='fu_session_result' style='margin-top: 8px'></div>
+						<?php elseif ($connection_mode === 'cookies'): ?>
+							<p class='text-muted'><?= __('Cookies stored from previous fetches are passed to the next request.') ?></p>
+						<?php else: ?>
+							<p class='text-muted'><?= __('Each request uses a fresh browser context.') ?></p>
+						<?php endif; ?>
+					</div>
+				</div>
+				<hr style='margin: 12px 0'>
+				<h4><?= __('Test Feed Fetch') ?></h4>
+				<div style='display: flex; gap: 8px; align-items: center; flex-wrap: wrap'>
+					<input dojoType='dijit.form.TextBox' id='fu_test_url'
+						value='https://sarahcandersen.com/rss' style='width: 400px'
+						placeholder='https://sarahcandersen.com/rss'>
+					<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFetchFeed()'>
+						<?= __('Fetch') ?>
+					</button>
+				</div>
+				<div id='fu_test_result' style='margin-top: 8px'></div>
+			</div>
+
+			<div class='fu-card'>
+				<h3><?= __('Feeds & Statistics') ?></h3>
+				<div style='display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 12px'>
+					<span><strong><?= __('OK:') ?></strong> <?= $stats['requests_ok'] ?></span>
+					<span><strong><?= __('Challenges:') ?></strong> <span class='text-warning'><?= $stats['requests_challenge'] ?></span></span>
+					<span><strong><?= __('Errors:') ?></strong> <span class='text-error'><?= $stats['requests_failed'] ?></span></span>
+					<span><strong><?= __('Ratelimited:') ?></strong> <?= $stats['requests_ratelimited'] ?></span>
+					<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetStats()'>
+						<?= __('Reset') ?>
+					</button>
+				</div>
+
+				<h4><?= __('Scan All Feeds') ?></h4>
+				<p class='text-muted'><?= __('Check all feeds for Cloudflare challenges. Feeds returning a challenge can then be enabled in their feed editor.') ?></p>
+				<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.scanFeeds()'>
+					<?= __('Scan Now') ?>
+				</button>
+				<div id='fu_scan_result' style='margin-top: 8px'></div>
+
+				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?></h4>
+				<?php
+					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
+					$all_feed_ids = array_map('intval', $all_feed_ids);
+
+					if ($all_feed_ids) {
+						$placeholders = implode(',', array_fill(0, count($all_feed_ids), '?'));
+						$sth = $this->pdo->prepare(
+							"SELECT id, title, feed_url FROM ttrss_feeds WHERE id IN ($placeholders) ORDER BY title"
+						);
+						$sth->execute($all_feed_ids);
+
+						echo "<ul class='panel panel-scrollable' style='max-height: 200px; overflow-y: auto'>";
+						foreach ($sth as $f) {
+							$icon = '';
+							if (in_array($f['id'], $enabled_feeds)) {
+								$icon = ' <span class=\"text-success\">[✓]</span>';
+							} elseif (in_array($f['id'], $excluded_feeds)) {
+								$icon = ' <span class=\"text-warning\">[✗]</span>';
+							}
+							$cc = $challenge_map[(string)$f['id']] ?? 0;
+							$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
+							echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
+								$icon .
+								$challenge_tag .
+								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
+						}
+						echo "</ul>";
+						echo "<p class='text-muted'>" . count($enabled_feeds) . " " . __('included,') . " " . count($excluded_feeds) . " " . __('excluded') . "</p>";
+					} else {
+						echo "<p class='text-muted'>" . __('No feeds configured. Open a feed\'s editor to set per-feed FlareSolverr behavior.') . "</p>";
 					}
-					echo "</ul>";
-					echo "<p class='text-muted'>" . count($enabled_feeds) . " " . __('included,') . " " . count($excluded_feeds) . " " . __('excluded') . "</p>";
-				} else {
-					echo "<p class='text-muted'>" . __('No feeds configured. Open a feed\'s editor to set per-feed FlareSolverr behavior.') . "</p>";
-				}
-			?>
+				?>
+			</div>
 
-			<hr/>
-
-			<h3><?= __('Scan Feeds') ?></h3>
-			<p class='text-muted'><?= __('Check all feeds for Cloudflare challenges. Feeds returning a challenge can then be enabled in their feed editor.') ?></p>
-			<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.scanFeeds()'>
-				<?= __('Scan All Feeds') ?>
-			</button>
-			<div id='fu_scan_result' style='margin-top: 8px'></div>
-
-			<hr/>
-			<div style='display: flex; justify-content: space-between; align-items: center; font-size: 0.85em'>
+			<div style='display: flex; justify-content: space-between; align-items: center; font-size: 0.85em; margin-top: 12px'>
 				<span class='text-muted' id='fu_version_info'>
 					<?php
 						$commit = $this->get_git_commit();
@@ -347,6 +346,13 @@ class Fu_Cloudflare extends Plugin {
 				<span><a href='#' onclick='Plugins.Fu_Cloudflare.checkVersion(); return false;'><?= __('Check now') ?></a></span>
 			</div>
 		</div>
+
+		<style>
+			.fu-card { border: 1px solid #ddd; border-radius: 6px; padding: 16px; margin-bottom: 16px; background: #fafafa; }
+			.fu-card h3 { margin: 0 0 12px 0; font-size: 1.1em; }
+			.fu-card h4 { margin: 0 0 6px 0; font-size: 0.95em; }
+			.fu-card fieldset { margin: 0; }
+		</style>
 		<?php
 	}
 
