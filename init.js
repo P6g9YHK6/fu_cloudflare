@@ -38,6 +38,7 @@ Plugins.Fu_Cloudflare = {
 
 		var url = document.getElementById("fu_test_url").value;
 		if (!url) {
+			Notify.close();
 			document.getElementById("fu_test_result").innerHTML = "<div class='notice alert alert-warning'>Please enter a URL.</div>";
 			return;
 		}
@@ -49,6 +50,8 @@ Plugins.Fu_Cloudflare = {
 			test_url: url
 		}, function(reply) {
 			var div = document.getElementById("fu_test_result");
+
+			Notify.close();
 
 			try {
 				var result = JSON.parse(reply);
@@ -82,6 +85,8 @@ Plugins.Fu_Cloudflare = {
 			method: "scanFeeds"
 		}, function(reply) {
 			var div = document.getElementById("fu_scan_result");
+
+			Notify.close();
 
 			try {
 				var result = JSON.parse(reply);
@@ -164,6 +169,8 @@ Plugins.Fu_Cloudflare = {
 			method: "testFlareSolverr"
 		}, function(reply) {
 			var div = document.getElementById("fu_flaresolverr_result");
+
+			Notify.close();
 
 			try {
 				var result = JSON.parse(reply);
