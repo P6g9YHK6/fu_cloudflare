@@ -55,10 +55,12 @@ If feeds are still failing:
 
 ## Version History
 
-- v1 — `d3c76c9` → `8e368e3` — initial commit, bare minimum plugin scaffold
-- v2 — `6c211af` → `6f8fd53` — first feature-complete: Test Feed Fetch, per-feed sessions, stats, scan feeds, retry
-- v3 — `806e557` → `8d339be` — major rewrite: 3 connection modes, 4 feed selectors, per-feed include/exclude, probe_cloudflare, cookie passthrough
-- v3.5 — `6a70aa5` → `6cf5ccb` — UI card layout, per-feed challenge counters, help tooltips, URL validation, JSON save response, Notify.close fixes, session reset creates new session
+| Tag | Range | Description |
+|---|---|---|
+| **v1** | `d3c76c9` → `8e368e3` | initial commit, bare minimum plugin scaffold |
+| **v2** | `6c211af` → `6f8fd53` | first feature-complete: Test Feed Fetch, per-feed sessions, stats, scan feeds, retry |
+| **v3** | `806e557` → `8d339be` | major rewrite: 3 connection modes, 4 feed selectors, per-feed include/exclude, probe_cloudflare, cookie passthrough |
+| **v3.5** | `6a70aa5` → `6cf5ccb` | UI card layout, per-feed challenge counters, help tooltips, URL validation, JSON save response, Notify.close fixes, session reset creates new session |
 
 ## Acknowledgments
 
