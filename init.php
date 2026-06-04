@@ -164,7 +164,17 @@ class Fu_Cloudflare extends Plugin {
 						if (this.validate()) {
 							Notify.progress('Saving data...', true);
 							xhr.post("backend.php", this.getValues(), (reply) => {
-								Notify.info(reply);
+								Notify.close();
+								try {
+									var r = JSON.parse(reply);
+									if (r.success) {
+										Notify.info(r.message);
+									} else {
+										Notify.error(r.error);
+									}
+								} catch(e) {
+									Notify.info(reply);
+								}
 							});
 						}
 					</script>
@@ -374,7 +384,7 @@ class Fu_Cloudflare extends Plugin {
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 
 		if (!$flaresolverr_url || !filter_var($flaresolverr_url, FILTER_VALIDATE_URL)) {
-			echo __("Invalid FlareSolverr URL.");
+			echo json_encode(["success" => false, "error" => __("Invalid FlareSolverr URL.")]);
 			return;
 		}
 
@@ -385,7 +395,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "connection_mode", $connection_mode);
 		$this->host->set($this, "per_feed_sessions", $per_feed);
 
-		echo __("Data saved.");
+		echo json_encode(["success" => true, "message" => __("Data saved.")]);
 	}
 
 	function testFlareSolverr() : void {
