@@ -146,6 +146,9 @@ class Fu_Cloudflare extends Plugin {
 		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
 		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1");
+		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_base_delay = (float)$this->host->get($this, "retry_base_delay", 1);
+		$retry_delay_factor = (int)$this->host->get($this, "retry_delay_factor", 2);
 		$stats = $this->get_stats();
 
 		$session_active = $this->host->get($this, "session_id", "");
@@ -249,6 +252,26 @@ class Fu_Cloudflare extends Plugin {
 							<?= $this->help_icon('When enabled, creates a warmup request after session creation and retries once on any transient failure. Fixes first-request failures with cold browser sessions.') ?>
 						</label>
 					</fieldset>
+
+					<div style='display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 8px'>
+						<fieldset>
+							<label><?= __('Retry count:') ?> <?= $this->help_icon('Number of retries after initial attempt. Set to 0 to disable retries. Next delays: ' . $this->get_retry_delay_string(5)) ?></label>
+							<input dojoType='dijit.form.NumberSpinner' name='retry_count'
+								value='<?= $retry_count ?>' smallDelta='1' min='0' max='10'>
+						</fieldset>
+
+						<fieldset>
+							<label><?= __('Base delay (s):') ?> <?= $this->help_icon('Initial delay before first retry. Next delays: ' . $this->get_retry_delay_string(5)) ?></label>
+							<input dojoType='dijit.form.NumberSpinner' name='retry_base_delay'
+								value='<?= $retry_base_delay ?>' smallDelta='0.5' min='0.1' max='60' constraints='{places:1}'>
+						</fieldset>
+
+						<fieldset>
+							<label><?= __('Delay factor:') ?> <?= $this->help_icon('Each retry delay is multiplied by this factor (must be >= 2). Next delays: ' . $this->get_retry_delay_string(5)) ?></label>
+							<input dojoType='dijit.form.NumberSpinner' name='retry_delay_factor'
+								value='<?= $retry_delay_factor ?>' smallDelta='1' min='2' max='10'>
+						</fieldset>
+					</div>
 
 					<div style='margin-top: 8px'><?= \Controls\submit_tag(__("Save Configuration")) ?></div>
 				</form>
@@ -391,6 +414,9 @@ class Fu_Cloudflare extends Plugin {
 		$connection_mode = clean($_POST["connection_mode"] ?? "persistent");
 		$per_feed = checkbox_to_sql_bool($_POST["per_feed_sessions"] ?? "") ? "1" : "0";
 		$retry_on_failure = checkbox_to_sql_bool($_POST["retry_on_failure"] ?? "") ? "1" : "0";
+		$retry_count = max(0, (int)($_POST["retry_count"] ?? 1));
+		$retry_base_delay = max(0.1, (float)($_POST["retry_base_delay"] ?? 1));
+		$retry_delay_factor = max(2, (int)($_POST["retry_delay_factor"] ?? 2));
 
 		if (!$flaresolverr_url || !filter_var($flaresolverr_url, FILTER_VALIDATE_URL)) {
 			echo json_encode(["success" => false, "error" => __("Invalid FlareSolverr URL.")]);
@@ -404,6 +430,9 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "connection_mode", $connection_mode);
 		$this->host->set($this, "per_feed_sessions", $per_feed);
 		$this->host->set($this, "retry_on_failure", $retry_on_failure);
+		$this->host->set($this, "retry_count", $retry_count);
+		$this->host->set($this, "retry_base_delay", $retry_base_delay);
+		$this->host->set($this, "retry_delay_factor", $retry_delay_factor);
 
 		echo json_encode(["success" => true, "message" => __("Data saved.")]);
 	}
@@ -476,12 +505,15 @@ class Fu_Cloudflare extends Plugin {
 		$mode = $this->host->get($this, "mode", "per_feed");
 		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1");
+		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_base_delay = (float)$this->host->get($this, "retry_base_delay", 1);
+		$retry_delay_factor = (int)$this->host->get($this, "retry_delay_factor", 2);
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 
 		$steps[] = [
 			"step" => "Configuration",
-			"detail" => "mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry_on_failure=" . ($retry_on_failure === "1" ? "yes" : "no") . ", max_timeout=" . $max_timeout . "ms",
+			"detail" => "mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry_on_failure=" . ($retry_on_failure === "1" ? "yes" : "no") . ", retry_count=" . $retry_count . ", retry_base_delay=" . $retry_base_delay . "s, retry_delay_factor=" . $retry_delay_factor . ", max_timeout=" . $max_timeout . "ms",
 			"time" => $t(),
 		];
 
@@ -547,10 +579,21 @@ class Fu_Cloudflare extends Plugin {
 		$steps[] = ["step" => "Fetch", "detail" => "Fetching URL via FlareSolverr with " . ($max_timeout / 1000) . "s timeout...", "time" => $t()];
 		$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 
-		if (!$result['success'] && $retry_on_failure === "1") {
-			$steps[] = ["step" => "Fetch", "detail" => "First attempt failed: {$result['error']}. Retrying after 2s...", "time" => $t()];
-			sleep(2);
-			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
+		if ($retry_on_failure === "1" && $retry_count > 0) {
+			for ($attempt = 1; $attempt <= $retry_count; $attempt++) {
+				if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
+					break;
+				}
+
+				$delay = $this->get_retry_delay($attempt);
+				if (!$result['success']) {
+					$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt failed: {$result['error']}. Retrying after {$delay}s...", "time" => $t()];
+				} elseif ($this->is_cloudflare_challenge($result['data'])) {
+					$steps[] = ["step" => "Fetch", "detail" => "Challenge detected on attempt $attempt, retrying after {$delay}s...", "time" => $t()];
+				}
+				sleep($delay);
+				$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
+			}
 		}
 
 		if (!$result['success']) {
@@ -565,23 +608,14 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		$is_cf = $this->is_cloudflare_challenge($result['data']);
-		if ($is_cf && $retry_on_failure === "1") {
-			$steps[] = ["step" => "Fetch", "detail" => "Challenge detected, retrying after 3s...", "time" => $t()];
-			sleep(3);
+		if ($is_cf && $connection_mode === "persistent") {
+			$steps[] = ["step" => "Session", "detail" => "Still challenged, trying fresh session...", "time" => $t()];
+			$this->host->set($this, $this->get_session_key(), "");
+			$session = $this->get_session($flaresolverr_url);
 			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
-
 			if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
 				$is_cf = false;
-				$steps[] = ["step" => "Fetch", "detail" => "Retry succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
-			} elseif ($connection_mode === "persistent") {
-				$steps[] = ["step" => "Session", "detail" => "Still challenged, trying fresh session...", "time" => $t()];
-				$this->host->set($this, $this->get_session_key(), "");
-				$session = $this->get_session($flaresolverr_url);
-				$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
-				if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
-					$is_cf = false;
-					$steps[] = ["step" => "Fetch", "detail" => "Fresh session succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
-				}
+				$steps[] = ["step" => "Fetch", "detail" => "Fresh session succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
 			}
 		}
 
@@ -727,74 +761,64 @@ class Fu_Cloudflare extends Plugin {
 		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 
-		if (empty($result['success']) && $this->host->get($this, "retry_on_failure", "1") === "1") {
-			Debug::log("fu_cloudflare: first attempt failed, retrying for feed $feed...", Debug::LOG_VERBOSE);
-			sleep(2);
-			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
-		}
+		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1") === "1";
 
-		if (!empty($result['success'])) {
-			if ($this->is_cloudflare_challenge($result['data'])) {
-				$backup_timeout = (int)$this->host->get($this, "max_timeout", 60000);
-				$doubled = min($backup_timeout * 2, 300000);
-				$this->host->set($this, "max_timeout", $doubled);
-				Debug::log("fu_cloudflare: challenge present, retry after 3s (timeout: {$doubled}ms)...", Debug::LOG_VERBOSE);
-				sleep(3);
+		if ($retry_on_failure && $retry_count > 0) {
+			for ($attempt = 1; $attempt <= $retry_count; $attempt++) {
+				$should_retry = false;
+				if (empty($result['success'])) {
+					$should_retry = true;
+					Debug::log("fu_cloudflare: attempt $attempt failed, retrying for feed $feed...", Debug::LOG_VERBOSE);
+				} elseif ($this->is_cloudflare_challenge($result['data'])) {
+					$should_retry = true;
+					$backup_timeout = (int)$this->host->get($this, "max_timeout", 60000);
+					$doubled = min($backup_timeout * 2, 300000);
+					$this->host->set($this, "max_timeout", $doubled);
+					Debug::log("fu_cloudflare: challenge present, retry $attempt for feed $feed (timeout: {$doubled}ms)...", Debug::LOG_VERBOSE);
+				}
+
+				if (!$should_retry) break;
+
+				$delay = $this->get_retry_delay($attempt);
+				sleep($delay);
 				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 				$this->host->set($this, "max_timeout", $backup_timeout);
 
 				if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
-					$this->increment_stat('stats_requests_ok');
-					Debug::log("fu_cloudflare: retry OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-					$this->store_feed_cookies($feed, $result);
-					return $result['data'];
+					break;
 				}
-
-				if ($fs_mode === 'persistent') {
-					Debug::log("fu_cloudflare: still challenge, trying fresh session...", Debug::LOG_VERBOSE);
-					$this->host->set($this, $this->get_session_key($feed), "");
-					$session = $this->get_session($flaresolverr_url, $feed);
-					$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
-
-					if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
-						$this->increment_stat('stats_requests_ok');
-						Debug::log("fu_cloudflare: fresh session OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-						$this->store_feed_cookies($feed, $result);
-						return $result['data'];
-					}
-				}
-
-				$this->increment_stat('stats_requests_challenge');
-				$this->increment_challenge_count($feed);
-				$msg = "fu_cloudflare: FlareSolverr returned a Cloudflare challenge page — it could not solve this challenge";
-				Debug::log($msg, Debug::LOG_VERBOSE);
-				return $result['data'];
 			}
+		}
 
+		if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
 			$this->increment_stat('stats_requests_ok');
 			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
 			$this->store_feed_cookies($feed, $result);
 			return $result['data'];
 		}
 
+		if ($this->is_cloudflare_challenge($result['data'])) {
+			$this->increment_stat('stats_requests_challenge');
+			$this->increment_challenge_count($feed);
+			Debug::log("fu_cloudflare: FlareSolverr returned a challenge for feed $feed", Debug::LOG_VERBOSE);
+		} else {
+			$this->increment_stat('stats_requests_failed');
+			Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed", Debug::LOG_VERBOSE);
+		}
+
 		if ($fs_mode === 'persistent' && !empty($this->last_fetch_error['session_error'])) {
-			Debug::log("fu_cloudflare: session expired, creating fresh session...", Debug::LOG_VERBOSE);
+			Debug::log("fu_cloudflare: session error, trying fresh session...", Debug::LOG_VERBOSE);
 			$this->host->set($this, $this->get_session_key($feed), "");
 			$session = $this->get_session($flaresolverr_url, $feed);
 			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
-			if (!empty($result['success'])) {
-				$label = $this->is_cloudflare_challenge($result['data']) ? "challenge" : "OK";
-				Debug::log("fu_cloudflare: fresh session $label (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
-				if (!$this->is_cloudflare_challenge($result['data'])) {
-					$this->increment_stat('stats_requests_ok');
-					$this->store_feed_cookies($feed, $result);
-				}
+			if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
+				$this->increment_stat('stats_requests_ok');
+				$this->store_feed_cookies($feed, $result);
 				return $result['data'];
 			}
 		}
 
-		$this->increment_stat('stats_requests_failed');
-		Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed, returning original data", Debug::LOG_VERBOSE);
 		return $feed_data;
 	}
 
@@ -810,6 +834,38 @@ class Fu_Cloudflare extends Plugin {
 		curl_close($ch);
 		if ($errno) return false;
 		return $body;
+	}
+
+	private function get_retry_delays($count = 5) {
+		$base = (float)$this->host->get($this, "retry_base_delay", 1);
+		$factor = (int)$this->host->get($this, "retry_delay_factor", 2);
+		$delays = [];
+		for ($i = 0; $i < $count; $i++) {
+			$delays[] = $base * pow($factor, $i);
+		}
+		return $delays;
+	}
+
+	private function get_retry_delay($attempt) {
+		$base = (float)$this->host->get($this, "retry_base_delay", 1);
+		$factor = (int)$this->host->get($this, "retry_delay_factor", 2);
+		return $base * pow($factor, $attempt - 1);
+	}
+
+	private function get_retry_delay_string($count = 5) {
+		$delays = $this->get_retry_delays($count);
+		$parts = [];
+		foreach ($delays as $i => $d) {
+			$parts[] = ($i + 1) . ": " . $this->format_delay($d);
+		}
+		return implode(", ", $parts);
+	}
+
+	private function format_delay($seconds) {
+		if ($seconds >= 60) {
+			return round($seconds / 60, 1) . "m";
+		}
+		return $seconds . "s";
 	}
 
 	private function is_cloudflare_challenge($data) {
