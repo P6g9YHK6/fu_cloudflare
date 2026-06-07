@@ -513,7 +513,7 @@ class Fu_Cloudflare extends Plugin {
 
 		$steps[] = [
 			"step" => "Configuration",
-			"detail" => "mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry_on_failure=" . ($retry_on_failure === "1" ? "yes" : "no") . ", retry_count=" . $retry_count . ", retry_base_delay=" . $retry_base_delay . "s, retry_delay_factor=" . $retry_delay_factor . ", max_timeout=" . $max_timeout . "ms",
+			"detail" => "target=" . $url . ", flaresolverr=" . $flaresolverr_url . ", mode=" . ($mode ?: "per_feed") . ", connection_mode=" . ($connection_mode ?: "persistent") . ", retry=" . ($retry_on_failure === "1" ? "yes(" . $retry_count . "x, base=" . $retry_base_delay . "s, factor=" . $retry_delay_factor . ")" : "no") . ", max_timeout=" . $max_timeout . "ms",
 			"time" => $t(),
 		];
 
@@ -576,21 +576,20 @@ class Fu_Cloudflare extends Plugin {
 			$steps[] = ["step" => "Stateless", "detail" => "connection_mode=stateless: fresh browser each request, no session.", "time" => $t()];
 		}
 
-		$steps[] = ["step" => "Fetch", "detail" => "Fetching URL via FlareSolverr with " . ($max_timeout / 1000) . "s timeout...", "time" => $t()];
+		$initial_fetch_detail = "Fetching via FlareSolverr (timeout=" . ($max_timeout / 1000) . "s, session=" . ($session ?: "none") . ", cookies=" . count($cookies) . ")...";
+		$steps[] = ["step" => "Fetch", "detail" => $initial_fetch_detail, "time" => $t()];
 		$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 
 		if ($retry_on_failure === "1" && $retry_count > 0) {
 			for ($attempt = 1; $attempt <= $retry_count; $attempt++) {
 				if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
+					$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt: HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . " — OK", "time" => $t()];
 					break;
 				}
 
 				$delay = $this->get_retry_delay($attempt);
-				if (!$result['success']) {
-					$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt failed: {$result['error']}. Retrying after {$delay}s...", "time" => $t()];
-				} elseif ($this->is_cloudflare_challenge($result['data'])) {
-					$steps[] = ["step" => "Fetch", "detail" => "Challenge detected on attempt $attempt, retrying after {$delay}s...", "time" => $t()];
-				}
+				$cf_status = $this->is_cloudflare_challenge($result['data']) ? "CF-CHALLENGE" : "FAILED";
+				$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt: HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . " — $cf_status. Retrying after {$delay}s...", "time" => $t()];
 				sleep($delay);
 				$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 			}
@@ -609,42 +608,38 @@ class Fu_Cloudflare extends Plugin {
 
 		$is_cf = $this->is_cloudflare_challenge($result['data']);
 		if ($is_cf && $connection_mode === "persistent") {
-			$steps[] = ["step" => "Session", "detail" => "Still challenged, trying fresh session...", "time" => $t()];
+			$steps[] = ["step" => "Session", "detail" => "Still challenged (HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data']) . " bytes, " . count($result['cookies'] ?? []) . " cookies), trying fresh session...", "time" => $t()];
 			$this->host->set($this, $this->get_session_key(), "");
 			$session = $this->get_session($flaresolverr_url);
 			$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 			if ($result['success'] && !$this->is_cloudflare_challenge($result['data'])) {
 				$is_cf = false;
-				$steps[] = ["step" => "Fetch", "detail" => "Fresh session succeeded (" . strlen($result['data']) . " bytes)", "time" => $t()];
+				$steps[] = ["step" => "Fetch", "detail" => "Fresh session: HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . " — SUCCESS", "time" => $t()];
 			}
 		}
 
+		$http_code = $result['http_code'] ?? '?';
 		if ($is_cf) {
-			$steps[] = ["step" => "Validation", "detail" => "WARNING: Response still contains Cloudflare challenge page. FlareSolverr could not solve the challenge.", "time" => $t()];
+			$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — FAILED: Cloudflare challenge not solved", "time" => $t()];
 		} else {
-			$steps[] = ["step" => "Validation", "detail" => "No Cloudflare challenge detected in response.", "time" => $t()];
-		}
-
-		$title = '';
-		if (preg_match('/<title>(.*?)<\/title>/is', $result['data'], $m)) {
-			$title = trim(strip_tags($m[1]));
-		}
-
-		if (!$title) {
-			$steps[] = ["step" => "Result", "detail" => "No <title> tag found in response. Check if this is a valid feed URL.", "time" => $t()];
-		} else {
-			$steps[] = ["step" => "Result", "detail" => "Title: \"$title\", User-Agent: {$result['user_agent']}, Cookies: " . count($result['cookies'] ?? []), "time" => $t()];
+			$title = '';
+			if (preg_match('/<title>(.*?)<\/title>/is', $result['data'], $m)) {
+				$title = trim(strip_tags($m[1]));
+			}
+			if (!$title) {
+				$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — WARNING: No <title> tag found", "time" => $t()];
+			} else {
+				$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, title=\"$title\", cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — SUCCESS", "time" => $t()];
+			}
 		}
 
 		echo json_encode([
-			"success" => !$is_cf && !!$title,
+			"success" => !$is_cf,
 			"steps" => $steps,
 			"time" => $t(),
-			"title" => $title,
+			"http_code" => $http_code,
 			"body_size" => strlen($result['data']),
-			"user_agent" => $result['user_agent'],
 			"cookies_count" => count($result['cookies'] ?? []),
-			"warning" => !$title ? "No <title> tag found" : ($is_cf ? "Cloudflare challenge still present" : null),
 		]);
 	}
 
@@ -743,7 +738,7 @@ class Fu_Cloudflare extends Plugin {
 			}
 		}
 
-		$fs_mode = $this->host->get($this, "connection_mode", "stateless");
+		$fs_mode = $this->host->get($this, "connection_mode", "persistent");
 		$session = $this->get_session($flaresolverr_url, $feed);
 		if ($session) {
 			Debug::log("fu_cloudflare: using session $session", Debug::LOG_VERBOSE);
@@ -1153,6 +1148,7 @@ class Fu_Cloudflare extends Plugin {
 				return [
 					'success' => true,
 					'data' => $data['solution']['response'],
+					'http_code' => $http_code,
 					'challenge_solved' => !empty($data['solution']['challenge']),
 					'user_agent' => $data['solution']['userAgent'] ?? '',
 					'cookies' => $data['solution']['cookies'] ?? [],
@@ -1160,16 +1156,16 @@ class Fu_Cloudflare extends Plugin {
 			}
 			if (isset($data['error'])) {
 				$is_session_error = str_contains($data['error'], 'Session not found');
-				return ['success' => false, 'error' => $data['error'], 'session_error' => $is_session_error];
+				return ['success' => false, 'error' => $data['error'], 'http_code' => $http_code, 'session_error' => $is_session_error];
 			}
-			return ['success' => false, 'error' => "HTTP $http_code: FlareSolverr returned no solution"];
+			return ['success' => false, 'error' => "HTTP $http_code: FlareSolverr returned no solution", 'http_code' => $http_code];
 		}
 
 		if ($curl_error) {
-			return ['success' => false, 'error' => "cURL error: $curl_error"];
+			return ['success' => false, 'error' => "cURL error: $curl_error", 'http_code' => $http_code];
 		}
 
-		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code"];
+		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code", 'http_code' => $http_code];
 	}
 
 	function api_version() {

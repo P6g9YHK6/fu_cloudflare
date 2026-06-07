@@ -71,8 +71,9 @@ Plugins.Fu_Cloudflare = {
 						var color = "#333";
 						if (s.step === "Error") color = "#d9534f";
 						else if (s.step === "Skipped") color = "#888";
-						else if (s.step === "Validation" && s.detail.indexOf("WARNING") !== -1) color = "#f0ad4e";
-						else if (s.step === "Fetch" && s.detail.indexOf("failed") !== -1) color = "#d9534f";
+						else if (s.step === "Result" && s.detail.indexOf("FAILED") !== -1) color = "#d9534f";
+						else if (s.step === "Result" && s.detail.indexOf("WARNING") !== -1) color = "#f0ad4e";
+						else if (s.step === "Result" && s.detail.indexOf("SUCCESS") !== -1) color = "#5cb85c";
 						var label = "◆ " + s.step;
 						if (s.time !== undefined) label += " [" + s.time.toFixed(2) + "s]";
 						html += "<div style='color: " + color + "'>" +
@@ -81,23 +82,7 @@ Plugins.Fu_Cloudflare = {
 					}
 				}
 
-				var summaryParts = [];
-				if (result.time !== undefined) summaryParts.push(result.time + "s");
-				if (result.body_size !== undefined) summaryParts.push(result.body_size + " bytes");
-				if (result.title) summaryParts.push('"' + result.title + '"');
-
-				html += "<div style='border-top: 1px solid #ddd; margin-top: 6px; padding-top: 6px; color: #555'>" +
-					"<strong>◇ Summary:</strong> " + summaryParts.join(", ");
-
-				if (result.user_agent) html += "<br/><strong>◇ User-Agent:</strong> " + result.user_agent;
-				if (result.cookies_count !== undefined) html += "<br/><strong>◇ Cookies:</strong> " + result.cookies_count;
-
-				if (result.error && hasError) html += "<br/><strong>◇ Error:</strong> " + result.error;
-
-				if (result.warning) html += "<br/><strong>◇ Warning:</strong> " + result.warning;
-				if (result.note) html += "<br/><strong>◇ Note:</strong> " + result.note;
-
-				html += "</div></div>";
+				html += "</div>";
 
 				div.innerHTML = html;
 			} catch(e) {
