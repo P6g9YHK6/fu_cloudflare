@@ -802,7 +802,7 @@ class Fu_Cloudflare extends Plugin {
 			Debug::log("fu_cloudflare: FlareSolverr failed for feed $feed", Debug::LOG_VERBOSE);
 		}
 
-		if ($fs_mode === 'persistent' && !empty($this->last_fetch_error['session_error'])) {
+		if (($fs_mode === 'persistent' || $fs_mode === 'cookies') && !empty($this->last_fetch_error['session_error'])) {
 			Debug::log("fu_cloudflare: session error, trying fresh session...", Debug::LOG_VERBOSE);
 			$this->host->set($this, $this->get_session_key($feed), "");
 			$session = $this->get_session($flaresolverr_url, $feed);
@@ -907,7 +907,7 @@ class Fu_Cloudflare extends Plugin {
 
 	private function get_session($flaresolverr_url, $feed = null) {
 		$mode = $this->host->get($this, "connection_mode", "persistent");
-		if ($mode !== 'persistent') return null;
+		if ($mode !== 'persistent' && $mode !== 'cookies') return null;
 
 		$key = $this->get_session_key($feed);
 		$session = $this->host->get($this, $key, "");
@@ -928,7 +928,7 @@ class Fu_Cloudflare extends Plugin {
 			$data = json_decode($response, true);
 			if (isset($data['session'])) {
 				$this->host->set($this, $key, $data['session']);
-				Debug::log("fu_cloudflare: created session {$data['session']}", Debug::LOG_VERBOSE);
+				Debug::log("fu_cloudflare: created session {$data['session']} (mode=$mode)", Debug::LOG_VERBOSE);
 
 				if ($this->host->get($this, "retry_on_failure", "1") === "1") {
 					$warmup = curl_init();
@@ -978,6 +978,17 @@ class Fu_Cloudflare extends Plugin {
 			foreach ($all as $fid) {
 				$this->host->set($this, "cookies_$fid", "");
 				$this->host->set($this, "ua_$fid", "");
+			}
+			if ($this->host->get($this, "per_feed_sessions", "0") === "1") {
+				$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+				foreach ($enabled_feeds as $fid) {
+					$this->host->set($this, "session_id_$fid", "");
+				}
+			}
+			$this->host->set($this, "session_id", "");
+
+			if ($flaresolverr_url) {
+				$session = $this->get_session($flaresolverr_url);
 			}
 		}
 
