@@ -571,7 +571,13 @@ class Fu_Cloudflare extends Plugin {
 				$steps[] = ["step" => "Session", "detail" => "Failed to create session. Proceeding without session.", "time" => $t()];
 			}
 		} elseif ($connection_mode === "cookies") {
-			$steps[] = ["step" => "Cookies", "detail" => "connection_mode=cookies: no session used. Cookies loaded per-feed in production (not available for test URL).", "time" => $t()];
+			$steps[] = ["step" => "Cookies", "detail" => "connection_mode=cookies: creating session for cookie passthrough...", "time" => $t()];
+			$session = $this->get_session($flaresolverr_url);
+			if ($session) {
+				$steps[] = ["step" => "Cookies", "detail" => "Session $session created for cookie passthrough.", "time" => $t()];
+			} else {
+				$steps[] = ["step" => "Cookies", "detail" => "Failed to create session for cookie passthrough.", "time" => $t()];
+			}
 		} else {
 			$steps[] = ["step" => "Stateless", "detail" => "connection_mode=stateless: fresh browser each request, no session.", "time" => $t()];
 		}
