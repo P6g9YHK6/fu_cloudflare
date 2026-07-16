@@ -149,6 +149,7 @@ class Fu_Cloudflare extends Plugin {
 		$retry_count = (int)$this->host->get($this, "retry_count", 1);
 		$retry_base_delay = (float)$this->host->get($this, "retry_base_delay", 1);
 		$retry_delay_factor = (int)$this->host->get($this, "retry_delay_factor", 2);
+		$usage_ping = $this->host->get($this, "usage_ping_enabled", "1");
 		$stats = $this->get_stats();
 
 		$session_active = $this->host->get($this, "session_id", "");
@@ -250,6 +251,13 @@ class Fu_Cloudflare extends Plugin {
 							<?= \Controls\checkbox_tag("retry_on_failure", $retry_on_failure === "1") ?>
 							<?= __('Retry on transient failure') ?>
 							<?= $this->help_icon('When enabled, creates a warmup request after session creation and retries once on any transient failure. Fixes first-request failures with cold browser sessions.') ?>
+						</label>
+					</fieldset>
+					<fieldset style='margin-top: 4px'>
+						<label class='checkbox'>
+							<?= \Controls\checkbox_tag("usage_ping_enabled", $usage_ping === "1") ?>
+							<?= __('Anonymous usage counter') ?>
+							<?= $this->help_icon('Sends a single anonymous HTTPS request to GitHub when a Cloudflare challenge is solved. Counts total challenges solved across all users. No personal data is sent.') ?>
 						</label>
 					</fieldset>
 
@@ -417,6 +425,7 @@ class Fu_Cloudflare extends Plugin {
 		$retry_count = max(0, (int)($_POST["retry_count"] ?? 1));
 		$retry_base_delay = max(0.1, (float)($_POST["retry_base_delay"] ?? 1));
 		$retry_delay_factor = max(2, (int)($_POST["retry_delay_factor"] ?? 2));
+		$usage_ping = checkbox_to_sql_bool($_POST["usage_ping_enabled"] ?? "") ? "1" : "0";
 
 		if (!$flaresolverr_url || !filter_var($flaresolverr_url, FILTER_VALIDATE_URL)) {
 			echo json_encode(["success" => false, "error" => __("Invalid FlareSolverr URL.")]);
@@ -433,6 +442,7 @@ class Fu_Cloudflare extends Plugin {
 		$this->host->set($this, "retry_count", $retry_count);
 		$this->host->set($this, "retry_base_delay", $retry_base_delay);
 		$this->host->set($this, "retry_delay_factor", $retry_delay_factor);
+		$this->host->set($this, "usage_ping_enabled", $usage_ping);
 
 		echo json_encode(["success" => true, "message" => __("Data saved.")]);
 	}
@@ -794,6 +804,7 @@ class Fu_Cloudflare extends Plugin {
 
 		if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
 			$this->increment_stat('stats_requests_ok');
+			$this->ping_usage_counter();
 			Debug::log("fu_cloudflare: FlareSolverr OK (" . strlen($result['data']) . " bytes) for feed $feed", Debug::LOG_VERBOSE);
 			$this->store_feed_cookies($feed, $result);
 			return $result['data'];
@@ -815,6 +826,7 @@ class Fu_Cloudflare extends Plugin {
 			$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 			if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
 				$this->increment_stat('stats_requests_ok');
+				$this->ping_usage_counter();
 				$this->store_feed_cookies($feed, $result);
 				return $result['data'];
 			}
@@ -879,6 +891,23 @@ class Fu_Cloudflare extends Plugin {
 	private function increment_stat($key) {
 		$val = (int)$this->host->get($this, $key, 0);
 		$this->host->set($this, $key, $val + 1);
+	}
+
+	private function ping_usage_counter() {
+		if ($this->host->get($this, "usage_ping_enabled", "1") !== "1") return;
+
+		$url = "https://github.com/P6g9YHK6/fu_cloudflare/releases/download/usage-counter/ping.txt";
+		$ch = curl_init();
+		curl_setopt_array($ch, [
+			CURLOPT_URL => $url,
+			CURLOPT_RETURNTRANSFER => true,
+			CURLOPT_TIMEOUT => 3,
+			CURLOPT_NOSIGNAL => true,
+			CURLOPT_HTTPHEADER => ["User-Agent: fu_cloudflare/usage-counter"],
+			CURLOPT_NOBODY => true,
+		]);
+		curl_exec($ch);
+		curl_close($ch);
 	}
 
 	private function increment_challenge_count($feed) {
