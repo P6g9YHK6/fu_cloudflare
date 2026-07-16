@@ -139,14 +139,14 @@ class Fu_Cloudflare extends Plugin {
 	function hook_prefs_tab($args) {
 		if ($args != "prefFeeds") return;
 
-		$mode = $this->host->get($this, "mode", "per_feed");
+		$mode = $this->host->get($this, "mode", "auto");
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "http://localhost:8191");
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
-		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
-		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
+		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 2);
+		$connection_mode = $this->host->get($this, "connection_mode", "cookies");
 		$per_feed = $this->host->get($this, "per_feed_sessions", "0");
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1");
-		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_count = (int)$this->host->get($this, "retry_count", 5);
 		$retry_base_delay = (float)$this->host->get($this, "retry_base_delay", 1);
 		$retry_delay_factor = (int)$this->host->get($this, "retry_delay_factor", 2);
 		$usage_ping = $this->host->get($this, "usage_ping_enabled", "1");
@@ -314,8 +314,8 @@ class Fu_Cloudflare extends Plugin {
 				<h4><?= __('Test Feed Fetch') ?> <?= $this->help_icon('Enter any feed URL to test if FlareSolverr can bypass Cloudflare for it. Shows HTTP code, challenge status, and response body.') ?></h4>
 				<div style='display: flex; gap: 8px; align-items: center; flex-wrap: wrap'>
 					<input dojoType='dijit.form.TextBox' id='fu_test_url'
-						value='https://sarahcandersen.com/rss' style='width: 400px'
-						placeholder='https://sarahcandersen.com/rss'>
+						value='https://www.flyer.co.uk/feed/' style='width: 400px'
+						placeholder='https://www.flyer.co.uk/feed/'>
 					<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.testFetchFeed()'>
 						<?= __('Fetch') ?>
 					</button>
@@ -512,10 +512,10 @@ class Fu_Cloudflare extends Plugin {
 		$start = microtime(true);
 		$t = fn() => round(microtime(true) - $start, 2);
 
-		$mode = $this->host->get($this, "mode", "per_feed");
-		$connection_mode = $this->host->get($this, "connection_mode", "persistent");
+		$mode = $this->host->get($this, "mode", "auto");
+		$connection_mode = $this->host->get($this, "connection_mode", "cookies");
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1");
-		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_count = (int)$this->host->get($this, "retry_count", 5);
 		$retry_base_delay = (float)$this->host->get($this, "retry_base_delay", 1);
 		$retry_delay_factor = (int)$this->host->get($this, "retry_delay_factor", 2);
 		$max_timeout = (int)$this->host->get($this, "max_timeout", 60000);
@@ -707,7 +707,7 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	function hook_fetch_feed($feed_data, $fetch_url, $owner_uid, $feed, $last_article_timestamp, $auth_login, $auth_pass) {
-		$mode = $this->host->get($this, "mode", "per_feed");
+		$mode = $this->host->get($this, "mode", "auto");
 
 		if ($mode === "disabled") {
 			Debug::log("fu_cloudflare: disabled", Debug::LOG_VERBOSE);
@@ -754,7 +754,7 @@ class Fu_Cloudflare extends Plugin {
 			}
 		}
 
-		$fs_mode = $this->host->get($this, "connection_mode", "persistent");
+		$fs_mode = $this->host->get($this, "connection_mode", "cookies");
 		$session = $this->get_session($flaresolverr_url, $feed);
 		if ($session) {
 			Debug::log("fu_cloudflare: using session $session", Debug::LOG_VERBOSE);
@@ -772,7 +772,7 @@ class Fu_Cloudflare extends Plugin {
 		Debug::log("fu_cloudflare: fetching feed $feed via FlareSolverr...", Debug::LOG_VERBOSE);
 		$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
 
-		$retry_count = (int)$this->host->get($this, "retry_count", 1);
+		$retry_count = (int)$this->host->get($this, "retry_count", 5);
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1") === "1";
 
 		if ($retry_on_failure && $retry_count > 0) {
@@ -940,7 +940,7 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	private function get_session($flaresolverr_url, $feed = null) {
-		$mode = $this->host->get($this, "connection_mode", "persistent");
+		$mode = $this->host->get($this, "connection_mode", "cookies");
 		if ($mode !== 'persistent' && $mode !== 'cookies') return null;
 
 		$key = $this->get_session_key($feed);
@@ -987,7 +987,7 @@ class Fu_Cloudflare extends Plugin {
 
 	function resetSession() : void {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
-		$mode = $this->host->get($this, "connection_mode", "persistent");
+		$mode = $this->host->get($this, "connection_mode", "cookies");
 		$session = null;
 
 		if ($mode === 'persistent') {
@@ -1121,7 +1121,7 @@ class Fu_Cloudflare extends Plugin {
 	}
 
 	private function acquire_flaresolverr_slot() {
-		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 3);
+		$max_concurrent = (int)$this->host->get($this, "max_concurrent", 2);
 		if ($max_concurrent < 1) return true;
 
 		$file = sys_get_temp_dir() . '/fu_cloudflare_semaphore';
