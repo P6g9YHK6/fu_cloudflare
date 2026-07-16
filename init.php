@@ -604,8 +604,8 @@ class Fu_Cloudflare extends Plugin {
 				}
 
 				$delay = $this->get_retry_delay($attempt);
-				$cf_status = $this->is_cloudflare_challenge($result['data']) ? "CF-CHALLENGE" : "FAILED";
-				$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt: HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . " — $cf_status. Retrying after {$delay}s...", "time" => $t()];
+				$cf_status = isset($result['data']) && $this->is_cloudflare_challenge($result['data']) ? "CF-CHALLENGE" : "FAILED";
+				$steps[] = ["step" => "Fetch", "detail" => "Attempt $attempt: HTTP " . ($result['http_code'] ?? '?') . ", " . strlen($result['data'] ?? '') . " bytes, cookies=" . count($result['cookies'] ?? []) . " — $cf_status. Retrying after {$delay}s...", "time" => $t()];
 				sleep($delay);
 				$result = $this->fetch_via_flaresolverr($url, $flaresolverr_url, $session, $cookies, $ua);
 			}
