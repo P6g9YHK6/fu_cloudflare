@@ -904,7 +904,6 @@ class Fu_Cloudflare extends Plugin {
 			CURLOPT_TIMEOUT => 3,
 			CURLOPT_NOSIGNAL => true,
 			CURLOPT_HTTPHEADER => ["User-Agent: fu_cloudflare/usage-counter"],
-			CURLOPT_NOBODY => true,
 		]);
 		curl_exec($ch);
 		curl_close($ch);
