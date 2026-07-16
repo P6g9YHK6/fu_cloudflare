@@ -639,14 +639,16 @@ class Fu_Cloudflare extends Plugin {
 			$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — FAILED: Cloudflare challenge not solved", "time" => $t()];
 		} else {
 			$title = '';
-			if (preg_match('/<title>(.*?)<\/title>/is', $result['data'], $m)) {
-				$title = trim(strip_tags($m[1]));
+			if (preg_match('/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/is', $result['data'], $m)) {
+				$title = trim(strip_tags(html_entity_decode($m[1])));
 			}
-			if (!$title) {
-				$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — WARNING: No <title> tag found", "time" => $t()];
-			} else {
-				$steps[] = ["step" => "Result", "detail" => "HTTP $http_code, " . strlen($result['data']) . " bytes, title=\"$title\", cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none') . " — SUCCESS", "time" => $t()];
+			if (!$title && preg_match('/<channel>.*?<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/is', $result['data'], $m)) {
+				$title = trim(strip_tags(html_entity_decode($m[1])));
 			}
+			$detail = "HTTP $http_code, " . strlen($result['data']) . " bytes, cookies=" . count($result['cookies'] ?? []) . ", UA=" . ($result['user_agent'] ?? 'none');
+			if ($title) $detail .= ", title=\"$title\"";
+			$detail .= " — SUCCESS";
+			$steps[] = ["step" => "Result", "detail" => $detail, "time" => $t()];
 		}
 
 		echo json_encode([
