@@ -149,31 +149,7 @@ Plugins.Fu_Cloudflare = {
 		});
 	},
 
-	checkVersion: function() {
-		Notify.progress('Checking for updates...', true);
-
-		xhr.post("backend.php", {
-			op: "PluginHandler",
-			plugin: "fu_cloudflare",
-			method: "resetVersionCheck"
-		}, function(reply) {
-			try {
-				var result = JSON.parse(reply);
-				var html = 'Version: <code>' + result.local + '</code>';
-				if (result.branch) html += ' (' + result.branch + ')';
-				html += ' ';
-				if (result.up_to_date) {
-					html += "<span class='text-success'>✓ up to date</span>";
-				} else if (result.latest) {
-					html += "<span class='text-warning'>⚠ New version available: <code>" + result.latest + "</code></span>";
-				}
-				document.getElementById("fu_version_info").innerHTML = html;
-				Notify.close();
-			} catch(e) {
-				document.getElementById("fu_version_info").innerHTML = reply;
-			}
-		});
-	},
+	// checkVersion: function() { ... }, // removed for production
 
 	testFlareSolverr: function() {
 		Notify.progress('Testing FlareSolverr...', true);
