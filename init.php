@@ -791,7 +791,7 @@ class Fu_Cloudflare extends Plugin {
 		return $seconds . "s";
 	}
 
-	private function is_cloudflare_challenge($data) {
+	public function is_cloudflare_challenge($data) {
 		if (preg_match('/<(title|h1|head)>.*(Checking your browser|Just a moment\.\.\.)/is', $data)) return true;
 		if (preg_match('/\/__challenge/', $data)) return true;
 		if (preg_match('/Attention Required.*Cloudflare/i', $data)) return true;
@@ -1103,7 +1103,8 @@ class Fu_Cloudflare extends Plugin {
 				return [
 					'success' => true,
 					'data' => $data['solution']['response'],
-					'http_code' => $http_code,
+					'http_code' => $data['solution']['status'] ?? $http_code,
+					'headers' => $data['solution']['headers'] ?? [],
 					'challenge_solved' => !empty($data['solution']['challenge']),
 					'user_agent' => $data['solution']['userAgent'] ?? '',
 					'cookies' => $data['solution']['cookies'] ?? [],
@@ -1121,6 +1122,89 @@ class Fu_Cloudflare extends Plugin {
 		}
 
 		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code", 'http_code' => $http_code];
+	}
+
+	public function is_enabled() {
+		$mode = $this->host->get($this, "mode", "auto");
+		if ($mode === "disabled") return false;
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
+		return !empty($flaresolverr_url);
+	}
+
+	public function probe_url($url) {
+		$probe_body = $this->probe_cloudflare($url);
+		if ($probe_body === false) return false;
+		return $this->is_cloudflare_challenge($probe_body);
+	}
+
+	public function fetch_url($url) {
+		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
+		if (!$flaresolverr_url) return $this->fallback_fetch($url);
+
+		$mode = $this->host->get($this, "mode", "auto");
+		if ($mode === "disabled") return $this->fallback_fetch($url);
+
+		$session = $this->get_session($flaresolverr_url);
+		$result = $this->fetch_with_rate_limit($url, $flaresolverr_url, $session);
+
+		$retry_count = (int)$this->host->get($this, "retry_count", 5);
+		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1") === "1";
+
+		if ($retry_on_failure && $retry_count > 0) {
+			for ($attempt = 1; $attempt <= $retry_count; $attempt++) {
+				if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) break;
+
+				$delay = $this->get_retry_delay($attempt);
+				sleep($delay);
+				$result = $this->fetch_with_rate_limit($url, $flaresolverr_url, $session);
+			}
+		}
+
+		if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
+			$this->increment_stat('stats_requests_ok');
+			$this->ping_usage_counter();
+			$this->set_content_type_from_headers($result['headers'] ?? []);
+			Debug::log("fu_cloudflare: fetch_url OK (" . strlen($result['data']) . " bytes) for $url", Debug::LOG_VERBOSE);
+			return $result['data'];
+		}
+
+		if (($this->host->get($this, "connection_mode", "cookies")) !== 'stateless' && !empty($this->last_fetch_error['session_error'])) {
+			Debug::log("fu_cloudflare: fetch_url session error, trying fresh session...", Debug::LOG_VERBOSE);
+			$this->host->set($this, "session_id", "");
+			$session = $this->get_session($flaresolverr_url);
+			$result = $this->fetch_with_rate_limit($url, $flaresolverr_url, $session);
+			if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
+				$this->increment_stat('stats_requests_ok');
+				$this->ping_usage_counter();
+				$this->set_content_type_from_headers($result['headers'] ?? []);
+				return $result['data'];
+			}
+		}
+
+		return $this->fallback_fetch($url);
+	}
+
+	private function fallback_fetch($url) {
+		if (function_exists('fetch_file_contents')) {
+			return fetch_file_contents($url);
+		}
+		$ch = curl_init();
+		curl_setopt($ch, CURLOPT_URL, $url);
+		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+		curl_setopt($ch, CURLOPT_TIMEOUT, 30);
+		curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+		$html = curl_exec($ch);
+		curl_close($ch);
+		return $html ?: false;
+	}
+
+	private function set_content_type_from_headers(array $headers) {
+		$content_type = $headers['Content-Type'] ?? $headers['content-type'] ?? '';
+		if (!$content_type) return;
+		if (class_exists('UrlHelper') && property_exists('UrlHelper', 'fetch_last_content_type')) {
+			UrlHelper::$fetch_last_content_type = $content_type;
+		}
+		$GLOBALS['fetch_last_content_type'] = $content_type;
 	}
 
 	function api_version() {
