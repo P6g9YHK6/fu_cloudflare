@@ -267,10 +267,11 @@ class Fu_Cloudflare extends Plugin {
 				</button>
 				<div id='fu_scan_result' style='margin-top: 8px'></div>
 
-				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?> <?= $this->help_icon('Feeds with a per-feed override. [✓] = bypass via FlareSolverr, [✗] = excluded from FlareSolverr. Number = challenge count since last reset.') ?></h4>
+				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?> <?= $this->help_icon('Feeds with a per-feed override, plus feeds auto-detected as Cloudflare-protected. [✓] = manually included, [✗] = manually excluded, [auto] = auto-detected via probing (mode=auto), not manually overridden. Number = challenge count since last reset.') ?></h4>
 				<?php
-					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds);
-					$all_feed_ids = array_map('intval', $all_feed_ids);
+					$auto_detected_feeds = array_map('intval', array_keys($challenge_map));
+					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds, $auto_detected_feeds);
+					$all_feed_ids = array_unique(array_map('intval', $all_feed_ids));
 
 					if ($all_feed_ids) {
 						$placeholders = implode(',', array_fill(0, count($all_feed_ids), '?'));
@@ -279,6 +280,7 @@ class Fu_Cloudflare extends Plugin {
 						);
 						$sth->execute($all_feed_ids);
 
+						$auto_only_count = 0;
 						echo "<ul class='panel panel-scrollable' style='max-height: 200px; overflow-y: auto'>";
 						foreach ($sth as $f) {
 							$icon = '';
@@ -286,6 +288,9 @@ class Fu_Cloudflare extends Plugin {
 								$icon = ' <span class=\"text-success\">[✓]</span>';
 							} elseif (in_array($f['id'], $excluded_feeds)) {
 								$icon = ' <span class=\"text-warning\">[✗]</span>';
+							} else {
+								$icon = ' <span class=\"text-muted\">[auto]</span>';
+								$auto_only_count++;
 							}
 							$cc = $challenge_map[(string)$f['id']] ?? 0;
 							$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
@@ -296,7 +301,7 @@ class Fu_Cloudflare extends Plugin {
 								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 						}
 						echo "</ul>";
-						echo "<p class='text-muted'>" . count($enabled_feeds) . " " . __('included,') . " " . count($excluded_feeds) . " " . __('excluded') . "</p>";
+						echo "<p class='text-muted'>" . count($enabled_feeds) . " " . __('included,') . " " . count($excluded_feeds) . " " . __('excluded,') . " " . $auto_only_count . " " . __('auto-detected') . "</p>";
 					} else {
 						echo "<p class='text-muted'>" . __('No feeds configured. Open a feed\'s editor to set per-feed FlareSolverr behavior.') . "</p>";
 					}
