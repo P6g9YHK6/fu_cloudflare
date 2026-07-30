@@ -181,5 +181,36 @@ Plugins.Fu_Cloudflare = {
 				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
 			}
 		});
+	},
+
+	resetStats: function() {
+		Notify.progress('Resetting statistics...', true);
+
+		xhr.post("backend.php", {
+			op: "PluginHandler",
+			plugin: "fu_cloudflare",
+			method: "resetStats"
+		}, function(reply) {
+			var div = document.getElementById("fu_reset_stats_result");
+
+			Notify.close();
+
+			try {
+				var result = JSON.parse(reply);
+
+				if (result.success) {
+					["fu_stat_ok", "fu_stat_challenge", "fu_stat_failed", "fu_stat_ratelimited"].forEach(function(id) {
+						document.getElementById(id).innerText = "0";
+					});
+					div.innerHTML = "";
+				} else {
+					div.innerHTML = "<div class='notice alert alert-warning'>" +
+						"<strong>Error:</strong> " + result.error +
+						"</div>";
+				}
+			} catch(e) {
+				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
+			}
+		});
 	}
 };

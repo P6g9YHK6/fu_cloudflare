@@ -250,14 +250,15 @@ class Fu_Cloudflare extends Plugin {
 			<div class='fu-card'>
 				<h3><?= __('Feeds & Statistics') ?></h3>
 				<div style='display: flex; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 12px'>
-					<span><strong><?= __('OK:') ?></strong> <?= $stats['requests_ok'] ?> <?= $this->help_icon('Successful fetches since last reset.') ?></span>
-					<span><strong><?= __('Challenges:') ?></strong> <span class='text-warning'><?= $stats['requests_challenge'] ?></span> <?= $this->help_icon('FlareSolverr returned a challenge page — it could not solve the challenge.') ?></span>
-					<span><strong><?= __('Errors:') ?></strong> <span class='text-error'><?= $stats['requests_failed'] ?></span> <?= $this->help_icon('Network or server errors during fetch.') ?></span>
-					<span><strong><?= __('Ratelimited:') ?></strong> <?= $stats['requests_ratelimited'] ?> <?= $this->help_icon('Requests skipped due to rate limiter.') ?></span>
+					<span><strong><?= __('OK:') ?></strong> <span id='fu_stat_ok'><?= $stats['requests_ok'] ?></span> <?= $this->help_icon('Successful fetches since last reset.') ?></span>
+					<span><strong><?= __('Challenges:') ?></strong> <span id='fu_stat_challenge' class='text-warning'><?= $stats['requests_challenge'] ?></span> <?= $this->help_icon('FlareSolverr returned a challenge page — it could not solve the challenge.') ?></span>
+					<span><strong><?= __('Errors:') ?></strong> <span id='fu_stat_failed' class='text-error'><?= $stats['requests_failed'] ?></span> <?= $this->help_icon('Network or server errors during fetch.') ?></span>
+					<span><strong><?= __('Ratelimited:') ?></strong> <span id='fu_stat_ratelimited'><?= $stats['requests_ratelimited'] ?></span> <?= $this->help_icon('Requests skipped due to rate limiter.') ?></span>
 					<button dojoType='dijit.form.Button' onclick='Plugins.Fu_Cloudflare.resetStats()'>
 						<?= __('Reset') ?>
 					</button>
 				</div>
+				<div id='fu_reset_stats_result'></div>
 
 				<h4><?= __('Scan All Feeds') ?> <?= $this->help_icon('Checks every feed in the database for Cloudflare via a quick HTTP request. Shows HTTP code, challenge detection, historical challenge count, and override status.') ?></h4>
 				<p class='text-muted'><?= __('Check all feeds for Cloudflare challenges. Feeds returning a challenge can then be enabled in their feed editor.') ?></p>
@@ -686,6 +687,7 @@ class Fu_Cloudflare extends Plugin {
 		$retry_on_failure = $this->host->get($this, "retry_on_failure", "1") === "1";
 
 		if ($retry_on_failure && $retry_count > 0) {
+			$backup_timeout = null;
 			for ($attempt = 1; $attempt <= $retry_count; $attempt++) {
 				$should_retry = false;
 				if (empty($result['success'])) {
@@ -704,7 +706,9 @@ class Fu_Cloudflare extends Plugin {
 				$delay = $this->get_retry_delay($attempt);
 				sleep($delay);
 				$result = $this->fetch_with_rate_limit($fetch_url, $flaresolverr_url, $session, $cookies, $ua);
-				$this->host->set($this, "max_timeout", $backup_timeout);
+				if ($backup_timeout !== null) {
+					$this->host->set($this, "max_timeout", $backup_timeout);
+				}
 
 				if (!empty($result['success']) && !$this->is_cloudflare_challenge($result['data'])) {
 					break;
