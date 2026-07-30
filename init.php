@@ -271,7 +271,7 @@ class Fu_Cloudflare extends Plugin {
 				<?php
 					$auto_detected_feeds = array_map('intval', array_keys($challenge_map));
 					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds, $auto_detected_feeds);
-					$all_feed_ids = array_unique(array_map('intval', $all_feed_ids));
+					$all_feed_ids = array_values(array_unique(array_map('intval', $all_feed_ids)));
 
 					if ($all_feed_ids) {
 						$placeholders = implode(',', array_fill(0, count($all_feed_ids), '?'));
