@@ -289,7 +289,8 @@ class Fu_Cloudflare extends Plugin {
 							}
 							$cc = $challenge_map[(string)$f['id']] ?? 0;
 							$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
-							echo "<li><a href='prefs.php?op=prefFeeds' target='_blank'>" . htmlspecialchars($f['title']) . "</a>" .
+							$fid = (int)$f['id'];
+							echo "<li><a href='#' onclick='CommonDialogs.editFeed($fid); return false;'>" . htmlspecialchars($f['title']) . "</a>" .
 								$icon .
 								$challenge_tag .
 								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
