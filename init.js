@@ -212,5 +212,35 @@ Plugins.Fu_Cloudflare = {
 				div.innerHTML = "<div class='notice alert alert-warning'>" + reply + "</div>";
 			}
 		});
+	},
+
+	resetFeedOverride: function(feedId, el) {
+		if (!confirm('Reset this feed to default? This clears its include/exclude override, challenge count, and any stored cookies/session for it.')) {
+			return;
+		}
+
+		Notify.progress('Resetting feed...', true);
+
+		xhr.post("backend.php", {
+			op: "PluginHandler",
+			plugin: "fu_cloudflare",
+			method: "resetFeedOverride",
+			feed_id: feedId
+		}, function(reply) {
+			Notify.close();
+
+			try {
+				var result = JSON.parse(reply);
+
+				if (result.success) {
+					var li = el.closest("li");
+					if (li) li.remove();
+				} else {
+					alert("Error: " + result.error);
+				}
+			} catch(e) {
+				alert(reply);
+			}
+		});
 	}
 };

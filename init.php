@@ -267,7 +267,7 @@ class Fu_Cloudflare extends Plugin {
 				</button>
 				<div id='fu_scan_result' style='margin-top: 8px'></div>
 
-				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?> <?= $this->help_icon('Feeds with a per-feed override, plus feeds auto-detected as Cloudflare-protected. [✓] = manually included, [✗] = manually excluded, [auto] = auto-detected via probing (mode=auto), not manually overridden. Number = challenge count since last reset.') ?></h4>
+				<h4 style='margin-top: 16px'><?= __('Configured Feeds') ?> <?= $this->help_icon('Feeds with a per-feed override, plus feeds auto-detected as Cloudflare-protected. ✅ = manually included, ❌ = manually excluded, 🔃 = auto-detected via probing (mode=auto), not manually overridden. Number = challenge count since last reset. [delete] resets a manually-overridden feed back to default, clearing its override, challenge count, and stored cookies/session.') ?></h4>
 				<?php
 					$auto_detected_feeds = array_map('intval', array_keys($challenge_map));
 					$all_feed_ids = array_merge($enabled_feeds, $excluded_feeds, $auto_detected_feeds);
@@ -284,20 +284,25 @@ class Fu_Cloudflare extends Plugin {
 						echo "<ul class='panel panel-scrollable' style='max-height: 200px; overflow-y: auto'>";
 						foreach ($sth as $f) {
 							$icon = '';
+							$has_override = false;
 							if (in_array($f['id'], $enabled_feeds)) {
-								$icon = ' <span class=\"text-success\">[✓]</span>';
+								$icon = ' <span title=\"Manually included\">✅</span>';
+								$has_override = true;
 							} elseif (in_array($f['id'], $excluded_feeds)) {
-								$icon = ' <span class=\"text-warning\">[✗]</span>';
+								$icon = ' <span title=\"Manually excluded\">❌</span>';
+								$has_override = true;
 							} else {
-								$icon = ' <span class=\"text-muted\">[auto]</span>';
+								$icon = ' <span title=\"Auto-detected\">🔃</span>';
 								$auto_only_count++;
 							}
 							$cc = $challenge_map[(string)$f['id']] ?? 0;
 							$challenge_tag = $cc > 0 ? " <span class='text-warning'>({$cc} challenged)</span>" : '';
 							$fid = (int)$f['id'];
+							$delete_link = $has_override ? " <a href='#' class='text-error' onclick='Plugins.Fu_Cloudflare.resetFeedOverride($fid, this); return false;'>[delete]</a>" : '';
 							echo "<li><a href='#' onclick='CommonDialogs.editFeed($fid); return false;'>" . htmlspecialchars($f['title']) . "</a>" .
 								$icon .
 								$challenge_tag .
+								$delete_link .
 								" <span class='text-muted'>(" . htmlspecialchars($f['feed_url']) . ")</span></li>";
 						}
 						echo "</ul>";
@@ -849,6 +854,35 @@ class Fu_Cloudflare extends Plugin {
 			$this->host->set($this, $k, 0);
 		}
 		$this->host->set($this, "challenges_per_feed", "{}");
+		echo json_encode(["success" => true]);
+	}
+
+	function resetFeedOverride() : void {
+		$feed_id = (int)($_POST['feed_id'] ?? 0);
+		if ($feed_id <= 0) {
+			echo json_encode(["success" => false, "error" => __("Invalid feed ID.")]);
+			return;
+		}
+
+		$enabled_feeds = $this->host->get_array($this, "enabled_feeds");
+		$excluded_feeds = $this->host->get_array($this, "excluded_feeds");
+
+		$ek = array_search($feed_id, $enabled_feeds);
+		if ($ek !== false) unset($enabled_feeds[$ek]);
+		$xk = array_search($feed_id, $excluded_feeds);
+		if ($xk !== false) unset($excluded_feeds[$xk]);
+
+		$this->host->set($this, "enabled_feeds", array_values($enabled_feeds));
+		$this->host->set($this, "excluded_feeds", array_values($excluded_feeds));
+
+		$challenge_map = json_decode($this->host->get($this, "challenges_per_feed", "{}"), true) ?: [];
+		unset($challenge_map[(string)$feed_id]);
+		$this->host->set($this, "challenges_per_feed", json_encode($challenge_map));
+
+		$this->host->set($this, "cookies_$feed_id", "");
+		$this->host->set($this, "ua_$feed_id", "");
+		$this->host->set($this, "session_id_$feed_id", "");
+
 		echo json_encode(["success" => true]);
 	}
 
