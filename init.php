@@ -1124,20 +1124,20 @@ class Fu_Cloudflare extends Plugin {
 		return ['success' => false, 'error' => "FlareSolverr returned HTTP $http_code", 'http_code' => $http_code];
 	}
 
-	public function is_enabled() {
+	public function is_flaresolverr_enabled() {
 		$mode = $this->host->get($this, "mode", "auto");
 		if ($mode === "disabled") return false;
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 		return !empty($flaresolverr_url);
 	}
 
-	public function probe_url($url) {
+	public function is_url_cloudflare_challenged($url) {
 		$probe_body = $this->probe_cloudflare($url);
 		if ($probe_body === false) return false;
 		return $this->is_cloudflare_challenge($probe_body);
 	}
 
-	public function fetch_url($url) {
+	public function fetch_url_via_flaresolverr($url) {
 		$flaresolverr_url = $this->host->get($this, "flaresolverr_url", "");
 		if (!$flaresolverr_url) return $this->fallback_fetch($url);
 
@@ -1164,12 +1164,12 @@ class Fu_Cloudflare extends Plugin {
 			$this->increment_stat('stats_requests_ok');
 			$this->ping_usage_counter();
 			$this->set_content_type_from_headers($result['headers'] ?? []);
-			Debug::log("fu_cloudflare: fetch_url OK (" . strlen($result['data']) . " bytes) for $url", Debug::LOG_VERBOSE);
+			Debug::log("fu_cloudflare: fetch_url_via_flaresolverr OK (" . strlen($result['data']) . " bytes) for $url", Debug::LOG_VERBOSE);
 			return $result['data'];
 		}
 
 		if (($this->host->get($this, "connection_mode", "cookies")) !== 'stateless' && !empty($this->last_fetch_error['session_error'])) {
-			Debug::log("fu_cloudflare: fetch_url session error, trying fresh session...", Debug::LOG_VERBOSE);
+			Debug::log("fu_cloudflare: fetch_url_via_flaresolverr session error, trying fresh session...", Debug::LOG_VERBOSE);
 			$this->host->set($this, "session_id", "");
 			$session = $this->get_session($flaresolverr_url);
 			$result = $this->fetch_with_rate_limit($url, $flaresolverr_url, $session);

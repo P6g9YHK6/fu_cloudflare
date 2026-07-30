@@ -64,8 +64,8 @@ blocked by Cloudflare. Grab the plugin instance from the host and call its publi
 ```php
 $fu_cloudflare = PluginHost::getInstance()->get_plugin('fu_cloudflare');
 
-if ($fu_cloudflare && method_exists($fu_cloudflare, 'is_enabled') && $fu_cloudflare->is_enabled()) {
-    $result = $fu_cloudflare->fetch_url($url);
+if ($fu_cloudflare && method_exists($fu_cloudflare, 'is_flaresolverr_enabled') && $fu_cloudflare->is_flaresolverr_enabled()) {
+    $result = $fu_cloudflare->fetch_url_via_flaresolverr($url);
 
     if ($result !== false && !$fu_cloudflare->is_cloudflare_challenge($result)) {
         // $result is the fetched body, bypassed via FlareSolverr if needed
@@ -79,20 +79,21 @@ if ($fu_cloudflare && method_exists($fu_cloudflare, 'is_enabled') && $fu_cloudfl
 
 Available methods:
 
-- **`is_enabled(): bool`** — whether fu_cloudflare is configured and not globally disabled.
-  Check this before calling the others.
-- **`fetch_url(string $url): string|false`** — fetches `$url`, routing through FlareSolverr
-  with the configured retries if needed. Falls back to a plain direct fetch if FlareSolverr
-  isn't reachable or can't solve the challenge, so the return value may still be a
-  challenge page — always check it with `is_cloudflare_challenge()` before trusting it.
-  This method is independent of the per-feed include/exclude lists in the Feeds prefs tab
-  (those only affect the feed-fetching hook); it's meant for one-off URLs.
-- **`probe_url(string $url): bool`** — lightweight check (a plain HTTP request, no
-  FlareSolverr) for whether `$url` is currently behind a Cloudflare challenge. Useful to
-  decide whether it's worth calling `fetch_url()` at all.
+- **`is_flaresolverr_enabled(): bool`** — whether fu_cloudflare is configured and not
+  globally disabled. Check this before calling the others.
+- **`fetch_url_via_flaresolverr(string $url): string|false`** — fetches `$url`, routing
+  through FlareSolverr with the configured retries if needed. Falls back to a plain direct
+  fetch if FlareSolverr isn't reachable or can't solve the challenge, so the return value
+  may still be a challenge page — always check it with `is_cloudflare_challenge()` before
+  trusting it. This method is independent of the per-feed include/exclude lists in the
+  Feeds prefs tab (those only affect the feed-fetching hook); it's meant for one-off URLs.
+- **`is_url_cloudflare_challenged(string $url): bool`** — lightweight check (a plain HTTP
+  request, no FlareSolverr) for whether `$url` is currently behind a Cloudflare challenge.
+  Useful to decide whether it's worth calling `fetch_url_via_flaresolverr()` at all.
 - **`is_cloudflare_challenge(string $data): bool`** — checks whether a response body looks
-  like an unsolved Cloudflare challenge page. Use it on the result of `fetch_url()` (or
-  your own fetch) to tell a real response apart from a block page.
+  like an unsolved Cloudflare challenge page. Use it on the result of
+  `fetch_url_via_flaresolverr()` (or your own fetch) to tell a real response apart from a
+  block page.
 
 ## Version History
 
@@ -102,7 +103,7 @@ Available methods:
 | **v2** | `6c211af` → `6f8fd53` | first feature-complete: Test Feed Fetch, per-feed sessions, stats, scan feeds, retry |
 | **v3** | `806e557` → `8d339be` | major rewrite: 3 connection modes, 4 feed selectors, per-feed include/exclude, probe_cloudflare, cookie passthrough |
 | **v3.5** | `6a70aa5` → `6cf5ccb` | UI card layout, per-feed challenge counters, help tooltips, URL validation, JSON save response, Notify.close fixes, session reset creates new session |
-| **v3.6** | `f57fe92` → | inter-plugin API: `is_enabled()`, `probe_url()`, `fetch_url()`, public `is_cloudflare_challenge()` so other plugins can reuse the FlareSolverr connection |
+| **v3.6** | `f57fe92` → | inter-plugin API: `is_flaresolverr_enabled()`, `is_url_cloudflare_challenged()`, `fetch_url_via_flaresolverr()`, public `is_cloudflare_challenge()` so other plugins can reuse the FlareSolverr connection |
 
 ## Acknowledgments
 
